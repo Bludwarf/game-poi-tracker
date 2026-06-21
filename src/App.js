@@ -68,9 +68,12 @@ function loadState() {
   }
 }
 
-function saveState(pois, coordMode) {
+function saveState(pois, coordMode, invertZ) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ pois, coordMode }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ pois, coordMode, invertZ })
+    );
   } catch {}
 }
 
@@ -148,7 +151,7 @@ function CoordInput({ label, value, onChange }) {
 const MAP_SIZE = 520;
 const PADDING = 40;
 
-function MapView({ pois, selectedId, onSelect, coordMode }) {
+function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
   const canvasRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
   const [zoom, setZoom] = useState(1);
@@ -183,13 +186,13 @@ function MapView({ pois, selectedId, onSelect, coordMode }) {
     (wh, wv) => {
       const dw = MAP_SIZE - PADDING * 2,
         dh = MAP_SIZE - PADDING * 2;
+      const fracV = (wv - bounds.minZ) / (bounds.maxZ - bounds.minZ);
       return {
         cx: PADDING + ((wh - bounds.minX) / (bounds.maxX - bounds.minX)) * dw,
-        cy:
-          PADDING + (1 - (wv - bounds.minZ) / (bounds.maxZ - bounds.minZ)) * dh,
+        cy: PADDING + (invertZ ? fracV : 1 - fracV) * dh,
       };
     },
-    [bounds]
+    [bounds, invertZ]
   );
 
   const getPoiAt = useCallback(
@@ -280,7 +283,9 @@ function MapView({ pois, selectedId, onSelect, coordMode }) {
     for (let i = 0; i <= gc; i++) {
       const frac = i / gc;
       const wh = bounds.minX + frac * (bounds.maxX - bounds.minX);
-      const wv = bounds.maxZ - frac * (bounds.maxZ - bounds.minZ);
+      const wv = invertZ
+        ? bounds.minZ + frac * (bounds.maxZ - bounds.minZ)
+        : bounds.maxZ - frac * (bounds.maxZ - bounds.minZ);
       const px = PADDING + frac * (MAP_SIZE - PADDING * 2);
       const py = PADDING + frac * (MAP_SIZE - PADDING * 2);
       ctx.fillText(Math.round(wh), px - 10, MAP_SIZE - PADDING + 14);
@@ -339,6 +344,7 @@ function MapView({ pois, selectedId, onSelect, coordMode }) {
     labelH,
     labelV,
     coordMode,
+    invertZ,
   ]);
 
   const handleMouseMove = (e) => {
@@ -672,6 +678,7 @@ export default function App() {
   const [coordMode, setCoordModeRaw] = useState(
     () => COORD_MODES.find((m) => m.id === saved?.coordMode) ?? COORD_MODES[0]
   );
+  const [invertZ, setInvertZ] = useState(() => saved?.invertZ ?? false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editId, setEditId] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -685,8 +692,8 @@ export default function App() {
 
   // Persist on every change
   useEffect(() => {
-    saveState(pois, coordMode.id);
-  }, [pois, coordMode]);
+    saveState(pois, coordMode.id, invertZ);
+  }, [pois, coordMode, invertZ]);
 
   const setCoordMode = (mode) => setCoordModeRaw(mode);
 
@@ -1196,6 +1203,20 @@ export default function App() {
               </button>
             ))}
 
+            {/* Invert Z axis toggle */}
+            <button
+              onClick={() => setInvertZ((v) => !v)}
+              title="Inverser l'axe Z sur la carte"
+              style={{
+                ...btnStyle(invertZ ? "#FFD700" : "#445"),
+                background: invertZ ? "#FFD70022" : "transparent",
+                fontSize: 11,
+                padding: "3px 9px",
+              }}
+            >
+              ↕ Z
+            </button>
+
             {/* View toggle */}
             <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
               <button
@@ -1287,6 +1308,7 @@ export default function App() {
               selectedId={selectedId}
               onSelect={setSelectedId}
               coordMode={coordMode}
+              invertZ={invertZ}
             />
             {selPoi && (
               <div
