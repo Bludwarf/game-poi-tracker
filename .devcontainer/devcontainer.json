@@ -1,0 +1,9 @@
+{
+    "name": "game-poi-tracker",
+    "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+    "postCreateCommand": "npm install -g @anthropic-ai/claude-code && bash .devcontainer/sync-memory.sh",
+    "remoteEnv": {
+      "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
+    },
+    "forwardPorts": [3000]
+  }
