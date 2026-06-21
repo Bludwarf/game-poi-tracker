@@ -28,6 +28,10 @@
     "eject": {
       "name": "eject",
       "command": "pnpm eject"
+    },
+    "setup-claude": {
+      "name": "Install Claude Code",
+      "command": "npm install -g @anthropic-ai/claude-code && echo '✅ Claude Code prêt'"
     }
   }
 }
