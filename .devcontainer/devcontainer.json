@@ -1,35 +1,16 @@
 {
   "name": "game-poi-tracker",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
-  "features": {
-    "ghcr.io/devcontainers/features/common-utils:2": {
-      "installZsh": false,
-      "username": "vscode",
-      "uid": "1000",
-      "gid": "1000",
-      "upgradePackages": false
-    }
-  },
-  "postCreateCommand": "chmod +x .devcontainer/sync-memory.sh && curl -fsSL https://vibe.mistral.ai/install.sh | sh && pnpm install && .devcontainer/sync-memory.sh",
-  "postStartCommand": "echo 'Codespace prêt ! Lancez `vibe` ou `pnpm dev`.'",
-  "remoteEnv": {
-    "MISTRAL_API_KEY": "${localEnv:MISTRAL_API_KEY}"
-  },
+  "postCreateCommand": "pnpm install",
+  "postStartCommand": "pnpm start &",
   "forwardPorts": [3000],
   "customizations": {
     "vscode": {
       "extensions": [
-        "Mistralai.vibe",  // Extension Vibe pour VS Code
+        "Mistralai.vibe",  // Extension officielle
         "esbenp.prettier-vscode",
         "dbaeumer.vscode-eslint"
-      ],
-      "settings": {
-        "terminal.integrated.profiles.linux": {
-          "bash": {
-            "path": "bash"
-          }
-        }
-      }
+      ]
     }
   }
 }
