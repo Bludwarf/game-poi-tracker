@@ -32,6 +32,10 @@
     "setup-claude": {
       "name": "Install Claude Code",
       "command": "npm install -g @anthropic-ai/claude-code && echo '✅ Claude Code prêt'"
+    },
+    "setup-vibe-cli": {
+      "name": "Install Vibe CLI (Mistral)",
+      "command": "curl -fsSL https://vibe.mistral.ai/install.sh | sh"
     }
   }
 }
