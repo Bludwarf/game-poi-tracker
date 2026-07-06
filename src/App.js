@@ -39,6 +39,18 @@ const COORD_MODES = [
 
 const STORAGE_KEY = "poi-tracker-v1";
 
+// Palette des zones : chaque zone reçoit une couleur (auto ou choisie).
+const ZONE_COLORS = [
+  "#00E5FF",
+  "#39FF14",
+  "#FFD700",
+  "#FF4444",
+  "#AA88FF",
+  "#FF9F1C",
+  "#2EC4B6",
+  "#E71D73",
+];
+
 const btnStyle = (color) => ({
   background: "transparent",
   border: `1px solid ${color}55`,
@@ -57,6 +69,35 @@ const EMPTY_FORM = {
   note: "",
 };
 
+// Conteneur d'un panneau d'options révélé par la barre compacte.
+const PANEL_STYLE = {
+  marginTop: 10,
+  background: "#1A1F2E",
+  border: "1px solid #00E5FF22",
+  borderRadius: 8,
+  padding: "12px 14px",
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+};
+
+// Pastille indiquant qu'un filtre est actif sous une icône repliée.
+function ActiveDot() {
+  return (
+    <span
+      style={{
+        position: "absolute",
+        top: 3,
+        right: 3,
+        width: 6,
+        height: 6,
+        borderRadius: "50%",
+        background: "#39FF14",
+      }}
+    />
+  );
+}
+
 /* ── localStorage helpers ──────────────────────────────── */
 function loadState() {
   try {
@@ -68,11 +109,11 @@ function loadState() {
   }
 }
 
-function saveState(pois, coordMode, invertZ) {
+function saveState(pois, coordMode, invertZ, zones) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ pois, coordMode, invertZ })
+      JSON.stringify({ pois, coordMode, invertZ, zones })
     );
   } catch {}
 }
@@ -151,7 +192,7 @@ function CoordInput({ label, value, onChange }) {
 const MAP_SIZE = 520;
 const PADDING = 40;
 
-function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
+function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ }) {
   const canvasRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
   const [zoom, setZoom] = useState(1);
@@ -167,9 +208,20 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
   const labelV = coordMode.axes[coordMode.order.indexOf(axisV)];
 
   const bounds = useMemo(() => {
-    if (!pois.length) return { minX: -100, maxX: 100, minZ: -100, maxZ: 100 };
-    const hs = pois.map((p) => Number(p.coords[axisH]));
-    const vs = pois.map((p) => Number(p.coords[axisV]));
+    // Cadre la carte sur les POI ET les points de zone.
+    const hs = [];
+    const vs = [];
+    const add = (coords) => {
+      const h = Number(coords[axisH]);
+      const v = Number(coords[axisV]);
+      if (Number.isFinite(h) && Number.isFinite(v)) {
+        hs.push(h);
+        vs.push(v);
+      }
+    };
+    pois.forEach((p) => add(p.coords));
+    zones.forEach((z) => z.points.forEach((pt) => add(pt.coords)));
+    if (!hs.length) return { minX: -100, maxX: 100, minZ: -100, maxZ: 100 };
     let [minX, maxX] = [Math.min(...hs), Math.max(...hs)];
     let [minZ, maxZ] = [Math.min(...vs), Math.max(...vs)];
     const padX = Math.max((maxX - minX) * 0.2, 50);
@@ -180,7 +232,7 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
       minZ: minZ - padZ,
       maxZ: maxZ + padZ,
     };
-  }, [pois, axisH, axisV]);
+  }, [pois, zones, axisH, axisV]);
 
   const toCanvas = useCallback(
     (wh, wv) => {
@@ -200,19 +252,23 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
       const canvas = canvasRef.current;
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
-      const lx = (clientX - rect.left - pan.x) / zoom;
-      const ly = (clientY - rect.top - pan.y) / zoom;
+      const sx0 = clientX - rect.left;
+      const sy0 = clientY - rect.top;
+      // Test de survol en coordonnées ÉCRAN : le rayon de détection reste
+      // constant (14px) quel que soit le zoom, comme la taille des marqueurs.
       let closest = null,
         minDist = 14;
       pois.forEach((poi) => {
-        const { cx, cy } = toCanvas(
+        const base = toCanvas(
           Number(poi.coords[axisH]),
           Number(poi.coords[axisV])
         );
-        const dist = Math.hypot(lx - cx, ly - cy);
+        const px = pan.x + base.cx * zoom;
+        const py = pan.y + base.cy * zoom;
+        const dist = Math.hypot(sx0 - px, sy0 - py);
         if (dist < minDist) {
           minDist = dist;
-          closest = { poi, sx: clientX - rect.left, sy: clientY - rect.top };
+          closest = { poi, sx: sx0, sy: sy0 };
         }
       });
       return closest;
@@ -229,10 +285,15 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
     canvas.height = MAP_SIZE * dpr;
     canvas.style.width = MAP_SIZE + "px";
     canvas.style.height = MAP_SIZE + "px";
-    ctx.scale(dpr, dpr);
-    ctx.save();
-    ctx.translate(pan.x, pan.y);
-    ctx.scale(zoom, zoom);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Le zoom/pan n'est appliqué qu'aux POSITIONS, jamais aux tailles :
+    // les marqueurs et le texte gardent une taille d'écran fixe, seul
+    // l'espacement des points change → zoomer aère les zones denses.
+    const project = (cx, cy) => ({
+      x: pan.x + cx * zoom,
+      y: pan.y + cy * zoom,
+    });
 
     ctx.fillStyle = "#0D0F14";
     ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
@@ -241,15 +302,18 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
     ctx.strokeStyle = "#1A2A3A";
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= gc; i++) {
-      const x = PADDING + (i / gc) * (MAP_SIZE - PADDING * 2);
-      const y = PADDING + (i / gc) * (MAP_SIZE - PADDING * 2);
+      const g = PADDING + (i / gc) * (MAP_SIZE - PADDING * 2);
+      const v1 = project(g, PADDING);
+      const v2 = project(g, MAP_SIZE - PADDING);
       ctx.beginPath();
-      ctx.moveTo(x, PADDING);
-      ctx.lineTo(x, MAP_SIZE - PADDING);
+      ctx.moveTo(v1.x, v1.y);
+      ctx.lineTo(v2.x, v2.y);
       ctx.stroke();
+      const h1 = project(PADDING, g);
+      const h2 = project(MAP_SIZE - PADDING, g);
       ctx.beginPath();
-      ctx.moveTo(PADDING, y);
-      ctx.lineTo(MAP_SIZE - PADDING, y);
+      ctx.moveTo(h1.x, h1.y);
+      ctx.lineTo(h2.x, h2.y);
       ctx.stroke();
     }
 
@@ -257,18 +321,23 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
     ctx.strokeStyle = "#334455";
     ctx.lineWidth = 1;
     if (orig.cx >= PADDING && orig.cx <= MAP_SIZE - PADDING) {
+      const a = project(orig.cx, PADDING);
+      const b = project(orig.cx, MAP_SIZE - PADDING);
       ctx.beginPath();
-      ctx.moveTo(orig.cx, PADDING);
-      ctx.lineTo(orig.cx, MAP_SIZE - PADDING);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
       ctx.stroke();
     }
     if (orig.cy >= PADDING && orig.cy <= MAP_SIZE - PADDING) {
+      const a = project(PADDING, orig.cy);
+      const b = project(MAP_SIZE - PADDING, orig.cy);
       ctx.beginPath();
-      ctx.moveTo(PADDING, orig.cy);
-      ctx.lineTo(MAP_SIZE - PADDING, orig.cy);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
       ctx.stroke();
     }
 
+    // Libellés d'axes : fixés dans un coin de l'écran (taille constante).
     ctx.fillStyle = "#00E5FF88";
     ctx.font = "bold 11px monospace";
     ctx.fillText(
@@ -278,6 +347,7 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
     );
     ctx.fillText(`↑ ${labelV}`, PADDING - 20, PADDING - 8);
 
+    // Graduations : suivent la grille projetée mais gardent une taille fixe.
     ctx.fillStyle = "#334455";
     ctx.font = "9px monospace";
     for (let i = 0; i <= gc; i++) {
@@ -286,19 +356,60 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
       const wv = invertZ
         ? bounds.minZ + frac * (bounds.maxZ - bounds.minZ)
         : bounds.maxZ - frac * (bounds.maxZ - bounds.minZ);
-      const px = PADDING + frac * (MAP_SIZE - PADDING * 2);
-      const py = PADDING + frac * (MAP_SIZE - PADDING * 2);
-      ctx.fillText(Math.round(wh), px - 10, MAP_SIZE - PADDING + 14);
-      ctx.fillText(Math.round(wv), 2, py + 3);
+      const g = PADDING + frac * (MAP_SIZE - PADDING * 2);
+      const bottom = project(g, MAP_SIZE - PADDING);
+      const left = project(PADDING, g);
+      ctx.fillText(Math.round(wh), bottom.x - 10, bottom.y + 14);
+      ctx.fillText(Math.round(wv), left.x - 20, left.y + 3);
     }
+
+    // Zones : dessinées SOUS les marqueurs. Polyligne (ouverte) ou
+    // polygone rempli (fermée), + petits sommets. Tailles fixes (non zoomées).
+    zones.forEach((zone) => {
+      // On garde l'index d'origine (idx) pour numéroter comme la liste Zones.
+      const pts = zone.points
+        .map((pt, idx) => {
+          const b = toCanvas(Number(pt.coords[axisH]), Number(pt.coords[axisV]));
+          const p = project(b.cx, b.cy);
+          return { x: p.x, y: p.y, idx };
+        })
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (pts.length === 0) return;
+      if (pts.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        if (zone.closed && pts.length >= 3) {
+          ctx.closePath();
+          ctx.fillStyle = zone.color + "22";
+          ctx.fill();
+        }
+        ctx.strokeStyle = zone.color + "CC";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      ctx.fillStyle = zone.color + "88";
+      pts.forEach((p) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      // Numéros des sommets (option activable par zone), alignés sur la liste.
+      if (zone.showIndices) {
+        ctx.fillStyle = zone.color;
+        ctx.font = "bold 10px monospace";
+        pts.forEach((p) => ctx.fillText(`#${p.idx + 1}`, p.x + 5, p.y - 5));
+      }
+    });
 
     pois.forEach((poi) => {
       const cat =
         CATEGORIES.find((c) => c.id === poi.category) || CATEGORIES[5];
-      const { cx, cy } = toCanvas(
+      const base = toCanvas(
         Number(poi.coords[axisH]),
         Number(poi.coords[axisV])
       );
+      const { x: cx, y: cy } = project(base.cx, base.cy);
       const isSel = poi.id === selectedId;
       const r = isSel ? 10 : 7;
       if (isSel) {
@@ -330,10 +441,9 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
         ctx.fillText(`${hLabel}:${hVal.toFixed(0)}`, cx + r + 4, cy + 14);
       }
     });
-
-    ctx.restore();
   }, [
     pois,
+    zones,
     selectedId,
     zoom,
     pan,
@@ -381,12 +491,29 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
       }
     }
   };
-  const handleWheel = (e) => {
-    e.preventDefault();
-    setZoom((z) =>
-      Math.min(8, Math.max(0.3, z * (e.deltaY < 0 ? 1.12 : 0.89)))
-    );
-  };
+  // Écouteurs natifs non-passifs : React attache onWheel/onTouchMove en mode
+  // passif, ce qui empêche e.preventDefault() de bloquer le défilement de la
+  // page (molette sur desktop, glissé du doigt sur mobile).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      setZoom((z) =>
+        Math.min(8, Math.max(0.3, z * (e.deltaY < 0 ? 1.12 : 0.89)))
+      );
+    };
+    const onTouchMove = (e) => {
+      // Empêche le défilement de la page pendant le pan de la carte.
+      if (dragging.current) e.preventDefault();
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
   const handleTouchStart = (e) => {
     if (e.touches.length === 1) {
       const t = e.touches[0];
@@ -463,7 +590,12 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
       </div>
       <canvas
         ref={canvasRef}
-        style={{ display: "block", borderRadius: 6, cursor: "crosshair" }}
+        style={{
+          display: "block",
+          borderRadius: 6,
+          cursor: "crosshair",
+          touchAction: "none",
+        }}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -471,7 +603,6 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
           dragging.current = false;
           setTooltip(null);
         }}
-        onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -507,7 +638,7 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
           </div>
         </div>
       )}
-      {pois.length === 0 && (
+      {pois.length === 0 && zones.length === 0 && (
         <div
           style={{
             position: "absolute",
@@ -529,7 +660,16 @@ function MapView({ pois, selectedId, onSelect, coordMode, invertZ }) {
 }
 
 /* ── POICard ───────────────────────────────────────────── */
-function POICard({ poi, onDelete, onEdit, isSelected, onSelect, coordMode }) {
+function POICard({
+  poi,
+  onDelete,
+  onEdit,
+  isSelected,
+  onSelect,
+  coordMode,
+  zones = [],
+  onConvertToZone,
+}) {
   const cat = CATEGORIES.find((c) => c.id === poi.category) || CATEGORIES[5];
   return (
     <div
@@ -631,6 +771,35 @@ function POICard({ poi, onDelete, onEdit, isSelected, onSelect, coordMode }) {
           style={{ display: "flex", gap: 6 }}
           onClick={(e) => e.stopPropagation()}
         >
+          {zones.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onConvertToZone(poi.id, Number(e.target.value));
+              }}
+              title="Convertir ce POI en point d'une zone"
+              style={{
+                background: "#0D0F14",
+                border: "1px solid #2EC4B655",
+                color: "#2EC4B6",
+                fontFamily: "monospace",
+                fontSize: 12,
+                padding: "3px 6px",
+                borderRadius: 4,
+                outline: "none",
+                cursor: "pointer",
+              }}
+            >
+              <option value="" disabled>
+                → zone…
+              </option>
+              {zones.map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={() => onEdit(poi)} style={btnStyle("#00E5FF")}>
             ✎
           </button>
@@ -639,6 +808,380 @@ function POICard({ poi, onDelete, onEdit, isSelected, onSelect, coordMode }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── ZonesView ─────────────────────────────────────────── */
+function ZonesView({
+  zones,
+  coordMode,
+  expandedZoneId,
+  setExpandedZoneId,
+  zonePointForm,
+  setZonePointForm,
+  onAddZone,
+  onUpdateZone,
+  onDeleteZone,
+  onAddPoint,
+  onDeletePoint,
+  onMovePoint,
+}) {
+  const [newName, setNewName] = useState("");
+
+  const toggleExpand = (id) => {
+    setExpandedZoneId((cur) => (cur === id ? null : id));
+    setZonePointForm(["", "", ""]);
+  };
+
+  const handleAddZone = () => {
+    if (!newName.trim()) return;
+    onAddZone(newName);
+    setNewName("");
+  };
+
+  // Un point est ajoutable si les 3 coords sont des nombres valides.
+  const pointReady = zonePointForm.every(
+    (v) => v !== "" && v !== "-" && Number.isFinite(Number(v))
+  );
+
+  const label = { color: "#00E5FF", fontFamily: "monospace", fontSize: 11 };
+
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      {/* Créer une zone */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAddZone()}
+          placeholder="Nom de la nouvelle zone…"
+          style={{
+            flex: 1,
+            background: "#1A1F2E",
+            border: "1px solid #334",
+            color: "#C8D6E5",
+            fontSize: 14,
+            padding: "9px 14px",
+            borderRadius: 6,
+            outline: "none",
+            fontFamily: "monospace",
+          }}
+        />
+        <button
+          onClick={handleAddZone}
+          style={{
+            ...btnStyle("#00E5FF"),
+            background: "#00E5FF22",
+            fontSize: 13,
+            padding: "0 14px",
+          }}
+        >
+          ＋ Zone
+        </button>
+      </div>
+
+      {zones.length === 0 ? (
+        <div
+          style={{
+            textAlign: "center",
+            color: "#334",
+            fontFamily: "monospace",
+            padding: "40px 20px",
+            border: "1px dashed #223",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ fontSize: 32, marginBottom: 10 }}>⬠</div>
+          <div>Aucune zone.</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>
+            Créez-en une pour délimiter une aire de la carte.
+          </div>
+        </div>
+      ) : (
+        zones.map((zone) => {
+          const expanded = expandedZoneId === zone.id;
+          return (
+            <div
+              key={zone.id}
+              style={{
+                background: "#1A1F2E",
+                border: `1px solid ${zone.color}33`,
+                borderLeft: `3px solid ${zone.color}`,
+                borderRadius: 6,
+                padding: "12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              {/* En-tête de zone */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: 3,
+                    background: zone.color,
+                    flexShrink: 0,
+                  }}
+                />
+                <input
+                  value={zone.name}
+                  onChange={(e) =>
+                    onUpdateZone(zone.id, { name: e.target.value })
+                  }
+                  style={{
+                    flex: 1,
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: "1px solid transparent",
+                    color: "#E8F4FD",
+                    fontWeight: 700,
+                    fontSize: 15,
+                    fontFamily: "monospace",
+                    outline: "none",
+                    padding: "2px 0",
+                  }}
+                />
+                <span
+                  style={{
+                    color: "#66788A",
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                  }}
+                >
+                  {zone.points.length} pt
+                </span>
+                <button
+                  onClick={() =>
+                    onUpdateZone(zone.id, { closed: !zone.closed })
+                  }
+                  title="Zone fermée (remplie) / ouverte (ligne)"
+                  style={{
+                    ...btnStyle(zone.closed ? zone.color : "#66788A"),
+                    background: zone.closed ? `${zone.color}22` : "transparent",
+                    fontSize: 11,
+                  }}
+                >
+                  {zone.closed ? "▣ Fermée" : "▢ Ouverte"}
+                </button>
+                <button
+                  onClick={() =>
+                    onUpdateZone(zone.id, { showIndices: !zone.showIndices })
+                  }
+                  title="Afficher les numéros des points sur la carte"
+                  style={{
+                    ...btnStyle(zone.showIndices ? zone.color : "#66788A"),
+                    background: zone.showIndices
+                      ? `${zone.color}22`
+                      : "transparent",
+                    fontSize: 11,
+                  }}
+                >
+                  {zone.showIndices ? "☑" : "☐"} N°
+                </button>
+                <button
+                  onClick={() => toggleExpand(zone.id)}
+                  style={btnStyle("#00E5FF")}
+                >
+                  {expanded ? "▾" : "▸"}
+                </button>
+                <button
+                  onClick={() => onDeleteZone(zone.id)}
+                  style={btnStyle("#FF4444")}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {expanded && (
+                <>
+                  {/* Sélecteur de couleur */}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {ZONE_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => onUpdateZone(zone.id, { color: c })}
+                        title={c}
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: 4,
+                          background: c,
+                          border:
+                            zone.color === c
+                              ? "2px solid #E8F4FD"
+                              : "2px solid transparent",
+                          cursor: "pointer",
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Ajout d'un point */}
+                  <div
+                    style={{
+                      background: "#0D0F14",
+                      borderRadius: 6,
+                      padding: "10px 12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, 1fr)",
+                        gap: 10,
+                      }}
+                    >
+                      {coordMode.order.map((coordIdx, i) => (
+                        <CoordInput
+                          key={i}
+                          label={coordMode.axes[i]}
+                          value={zonePointForm[coordIdx]}
+                          onChange={(v) =>
+                            setZonePointForm((f) => {
+                              const c = [...f];
+                              c[coordIdx] = v;
+                              return c;
+                            })
+                          }
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => {
+                        onAddPoint(zone.id, zonePointForm);
+                        setZonePointForm(["", "", ""]);
+                      }}
+                      disabled={!pointReady}
+                      style={{
+                        ...btnStyle(pointReady ? "#39FF14" : "#334"),
+                        background: pointReady ? "#39FF1422" : "transparent",
+                        cursor: pointReady ? "pointer" : "not-allowed",
+                        fontSize: 12,
+                        padding: "7px 0",
+                      }}
+                    >
+                      ＋ Ajouter le point
+                    </button>
+                  </div>
+
+                  {/* Liste des points */}
+                  {zone.points.length === 0 ? (
+                    <div
+                      style={{
+                        color: "#445566",
+                        fontFamily: "monospace",
+                        fontSize: 12,
+                        textAlign: "center",
+                        padding: "6px 0",
+                      }}
+                    >
+                      Aucun point — ajoutez-en pour tracer la zone.
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      {zone.points.map((pt, idx) => (
+                        <div
+                          key={pt.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: "#0D0F14",
+                            borderRadius: 4,
+                            padding: "6px 10px",
+                          }}
+                        >
+                          <span style={{ ...label, color: "#66788A" }}>
+                            #{idx + 1}
+                          </span>
+                          <span
+                            style={{
+                              flex: 1,
+                              color: "#39FF14",
+                              fontFamily: "monospace",
+                              fontSize: 13,
+                            }}
+                          >
+                            {coordMode.order
+                              .map(
+                                (coordIdx, i) =>
+                                  `${coordMode.axes[i]}:${Number(
+                                    pt.coords[coordIdx]
+                                  ).toFixed(1)}`
+                              )
+                              .join("  ")}
+                          </span>
+                          <button
+                            onClick={() => onMovePoint(zone.id, idx, -1)}
+                            disabled={idx === 0}
+                            style={{
+                              ...btnStyle(idx === 0 ? "#334" : "#00E5FF"),
+                              cursor: idx === 0 ? "not-allowed" : "pointer",
+                              padding: "2px 8px",
+                            }}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            onClick={() => onMovePoint(zone.id, idx, 1)}
+                            disabled={idx === zone.points.length - 1}
+                            style={{
+                              ...btnStyle(
+                                idx === zone.points.length - 1
+                                  ? "#334"
+                                  : "#00E5FF"
+                              ),
+                              cursor:
+                                idx === zone.points.length - 1
+                                  ? "not-allowed"
+                                  : "pointer",
+                              padding: "2px 8px",
+                            }}
+                          >
+                            ▼
+                          </button>
+                          <button
+                            onClick={() => onDeletePoint(zone.id, pt.id)}
+                            style={{ ...btnStyle("#FF4444"), padding: "2px 8px" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
@@ -679,6 +1222,7 @@ export default function App() {
     () => COORD_MODES.find((m) => m.id === saved?.coordMode) ?? COORD_MODES[0]
   );
   const [invertZ, setInvertZ] = useState(() => saved?.invertZ ?? false);
+  const [zones, setZones] = useState(saved?.zones ?? []);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editId, setEditId] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -688,12 +1232,44 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [view, setView] = useState("list");
   const [importErr, setImportErr] = useState(null);
+  // Panneau d'options actuellement ouvert (null = tout masqué).
+  const [activePanel, setActivePanel] = useState(null);
+  // Zone dont l'éditeur de points est déplié, et saisie de point en cours.
+  const [expandedZoneId, setExpandedZoneId] = useState(null);
+  const [zonePointForm, setZonePointForm] = useState(["", "", ""]);
   const importRef = useRef(null);
+
+  // Compteur d'id monotone (zones + points) — évite les collisions de Date.now().
+  const idRef = useRef(Date.now());
+  const genId = () => ++idRef.current;
+
+  const togglePanel = (id, e) => {
+    // On enlève le focus pour éviter tout contour résiduel du navigateur
+    // qui pourrait faire croire qu'un bouton reste actif.
+    e?.currentTarget?.blur();
+    setActivePanel((cur) => (cur === id ? null : id));
+  };
+
+  // Bouton icône de la barre compacte : état actif nettement contrasté,
+  // état inactif discret (bordure transparente, texte grisé).
+  const iconBtn = (active, color = "#00E5FF") => ({
+    background: active ? `${color}33` : "transparent",
+    border: `1px solid ${active ? color : "transparent"}`,
+    color: active ? color : "#66788A",
+    borderRadius: 4,
+    padding: "6px 10px",
+    cursor: "pointer",
+    fontFamily: "monospace",
+    fontSize: 16,
+    lineHeight: 1,
+    position: "relative",
+    outline: "none",
+  });
 
   // Persist on every change
   useEffect(() => {
-    saveState(pois, coordMode.id, invertZ);
-  }, [pois, coordMode, invertZ]);
+    saveState(pois, coordMode.id, invertZ, zones);
+  }, [pois, coordMode, invertZ, zones]);
 
   const setCoordMode = (mode) => setCoordModeRaw(mode);
 
@@ -754,10 +1330,89 @@ export default function App() {
     setShowForm(false);
   };
 
+  /* ── Zones ── */
+  const addZone = (name) => {
+    const n = name.trim();
+    if (!n) return;
+    setZones((zs) => [
+      ...zs,
+      {
+        id: genId(),
+        name: n,
+        color: ZONE_COLORS[zs.length % ZONE_COLORS.length],
+        closed: true,
+        showIndices: false,
+        points: [],
+        createdAt: Date.now(),
+      },
+    ]);
+  };
+
+  const updateZone = (id, patch) =>
+    setZones((zs) => zs.map((z) => (z.id === id ? { ...z, ...patch } : z)));
+
+  const deleteZone = (id) => {
+    setZones((zs) => zs.filter((z) => z.id !== id));
+    if (expandedZoneId === id) setExpandedZoneId(null);
+  };
+
+  const addPointToZone = (zoneId, formCoords) => {
+    // formCoords : strings déjà en ordre [X, Y, Z] (le formulaire a mappé
+    // coordMode.order), on ne re-mappe pas — juste coercition numérique.
+    const coords = formCoords.map((v) => Number(v));
+    setZones((zs) =>
+      zs.map((z) =>
+        z.id === zoneId
+          ? { ...z, points: [...z.points, { id: genId(), coords }] }
+          : z
+      )
+    );
+  };
+
+  const deletePoint = (zoneId, pointId) =>
+    setZones((zs) =>
+      zs.map((z) =>
+        z.id === zoneId
+          ? { ...z, points: z.points.filter((p) => p.id !== pointId) }
+          : z
+      )
+    );
+
+  const movePoint = (zoneId, index, dir) =>
+    setZones((zs) =>
+      zs.map((z) => {
+        if (z.id !== zoneId) return z;
+        const j = index + dir;
+        if (j < 0 || j >= z.points.length) return z;
+        const pts = [...z.points];
+        [pts[index], pts[j]] = [pts[j], pts[index]];
+        return { ...z, points: pts };
+      })
+    );
+
+  const convertPoiToZonePoint = (poiId, zoneId) => {
+    const poi = pois.find((p) => p.id === poiId);
+    if (!poi) return;
+    setZones((zs) =>
+      zs.map((z) =>
+        z.id === zoneId
+          ? {
+              ...z,
+              points: [
+                ...z.points,
+                { id: genId(), coords: [...poi.coords].map(Number) },
+              ],
+            }
+          : z
+      )
+    );
+    handleDelete(poiId);
+  };
+
   /* ── Export JSON ── */
   const handleExport = () => {
     const data = JSON.stringify(
-      { version: 1, coordMode: coordMode.id, pois },
+      { version: 2, coordMode: coordMode.id, zones, pois },
       null,
       2
     );
@@ -783,14 +1438,26 @@ export default function App() {
         const existingIds = new Set(pois.map((p) => p.id));
         const newPois = parsed.pois.filter((p) => !existingIds.has(p.id));
         setPois((prev) => [...prev, ...newPois]);
+        // Merge zones (optionnel, rétro-compatible v1) — dédup par id.
+        let newZonesCount = 0;
+        if (Array.isArray(parsed.zones)) {
+          const existingZoneIds = new Set(zones.map((z) => z.id));
+          const newZones = parsed.zones.filter(
+            (z) => !existingZoneIds.has(z.id)
+          );
+          newZonesCount = newZones.length;
+          if (newZones.length) setZones((prev) => [...prev, ...newZones]);
+        }
         if (parsed.coordMode)
           setCoordModeRaw(
             COORD_MODES.find((m) => m.id === parsed.coordMode) ?? coordMode
           );
+        const zoneMsg =
+          newZonesCount > 0 ? ` + ${newZonesCount} zone(s)` : "";
         setImportErr(
-          newPois.length === 0
+          newPois.length === 0 && newZonesCount === 0
             ? "Aucun nouveau POI importé (tous déjà présents)."
-            : `${newPois.length} POI(s) importé(s) avec succès !`
+            : `${newPois.length} POI(s)${zoneMsg} importé(s) avec succès !`
         );
       } catch (err) {
         setImportErr("Erreur : fichier JSON invalide.");
@@ -1085,103 +1752,178 @@ export default function App() {
           </div>
         )}
 
-        {/* Toolbar: filters + coord mode + import/export */}
+        {/* Compact toolbar: view toggle + icon buttons */}
         <div
           style={{
             marginTop: 20,
             display: "flex",
-            flexDirection: "column",
-            gap: 10,
+            alignItems: "center",
+            gap: 6,
           }}
         >
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="🔍  Rechercher un POI..."
-            style={{
-              background: "#1A1F2E",
-              border: "1px solid #334",
-              color: "#C8D6E5",
-              fontSize: 14,
-              padding: "9px 14px",
-              borderRadius: 6,
-              outline: "none",
-              fontFamily: "monospace",
-            }}
-          />
-
-          {/* Category filter */}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {/* View toggle (toujours visible) */}
+          <div style={{ display: "flex", gap: 4 }}>
             <button
-              onClick={() => setFilterCat("all")}
+              onClick={() => setView("list")}
+              title="Vue liste"
               style={{
-                ...btnStyle(filterCat === "all" ? "#00E5FF" : "#445"),
-                background: filterCat === "all" ? "#00E5FF22" : "transparent",
-                fontSize: 11,
-                letterSpacing: 1,
+                ...iconBtn(view === "list"),
+                fontSize: 14,
               }}
             >
-              TOUS ({pois.length})
+              ☰
             </button>
-            {CATEGORIES.map((cat) => {
-              const count = pois.filter((p) => p.category === cat.id).length;
-              if (!count) return null;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setFilterCat(cat.id)}
-                  style={{
-                    ...btnStyle(filterCat === cat.id ? cat.color : "#445"),
-                    background:
-                      filterCat === cat.id ? `${cat.color}22` : "transparent",
-                    fontSize: 11,
-                    letterSpacing: 1,
-                  }}
-                >
-                  {cat.icon} {count}
-                </button>
-              );
-            })}
+            <button
+              onClick={() => setView("map")}
+              title="Vue carte"
+              style={{
+                ...iconBtn(view === "map"),
+                fontSize: 14,
+              }}
+            >
+              ⊕
+            </button>
+            <button
+              onClick={() => setView("zones")}
+              title="Vue zones"
+              style={{
+                ...iconBtn(view === "zones"),
+                fontSize: 14,
+              }}
+            >
+              ⬠
+            </button>
           </div>
 
-          {/* Row: sort + coord mode + view toggle */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              flexWrap: "wrap",
-            }}
-          >
-            <span
-              style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
+          {/* Icon buttons (ouvrent leur panneau) */}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+            <button
+              onClick={(e) => togglePanel("search", e)}
+              title="Rechercher"
+              style={iconBtn(activePanel === "search")}
             >
-              TRI :
-            </span>
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
+              🔍
+              {search && activePanel !== "search" && <ActiveDot />}
+            </button>
+            <button
+              onClick={(e) => togglePanel("filters", e)}
+              title="Filtres & tri"
+              style={iconBtn(activePanel === "filters")}
+            >
+              ⚑
+              {filterCat !== "all" && activePanel !== "filters" && <ActiveDot />}
+            </button>
+            <button
+              onClick={(e) => togglePanel("axes", e)}
+              title="Axes & affichage"
+              style={iconBtn(activePanel === "axes", "#FFD700")}
+            >
+              ⚙
+            </button>
+            <button
+              onClick={(e) => togglePanel("data", e)}
+              title="Import / Export JSON"
+              style={iconBtn(activePanel === "data", "#AA88FF")}
+            >
+              ⇅
+            </button>
+          </div>
+        </div>
+
+        {/* Panneau : recherche */}
+        {activePanel === "search" && (
+          <div style={PANEL_STYLE}>
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔍  Rechercher un POI..."
               style={{
-                background: "#1A1F2E",
+                background: "#0D0F14",
                 border: "1px solid #334",
-                color: "#889",
-                fontFamily: "monospace",
-                fontSize: 12,
-                padding: "4px 8px",
-                borderRadius: 4,
+                color: "#C8D6E5",
+                fontSize: 14,
+                padding: "9px 14px",
+                borderRadius: 6,
                 outline: "none",
+                fontFamily: "monospace",
+                width: "100%",
+                boxSizing: "border-box",
               }}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            />
+          </div>
+        )}
 
-            <span style={{ color: "#334", margin: "0 2px" }}>|</span>
+        {/* Panneau : filtres catégorie + tri */}
+        {activePanel === "filters" && (
+          <div
+            style={{ ...PANEL_STYLE, flexDirection: "column", gap: 12 }}
+          >
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button
+                onClick={() => setFilterCat("all")}
+                style={{
+                  ...btnStyle(filterCat === "all" ? "#00E5FF" : "#445"),
+                  background: filterCat === "all" ? "#00E5FF22" : "transparent",
+                  fontSize: 11,
+                  letterSpacing: 1,
+                }}
+              >
+                TOUS ({pois.length})
+              </button>
+              {CATEGORIES.map((cat) => {
+                const count = pois.filter((p) => p.category === cat.id).length;
+                if (!count) return null;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setFilterCat(cat.id)}
+                    style={{
+                      ...btnStyle(filterCat === cat.id ? cat.color : "#445"),
+                      background:
+                        filterCat === cat.id ? `${cat.color}22` : "transparent",
+                      fontSize: 11,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {cat.icon} {count}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
+              >
+                TRI :
+              </span>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                style={{
+                  background: "#0D0F14",
+                  border: "1px solid #334",
+                  color: "#889",
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  outline: "none",
+                }}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
 
-            {/* Coord mode toggle */}
+        {/* Panneau : axes & affichage */}
+        {activePanel === "axes" && (
+          <div style={{ ...PANEL_STYLE, alignItems: "center" }}>
             <span
               style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
             >
@@ -1202,8 +1944,6 @@ export default function App() {
                 {m.label}
               </button>
             ))}
-
-            {/* Invert Z axis toggle */}
             <button
               onClick={() => setInvertZ((v) => !v)}
               title="Inverser l'axe Z sur la carte"
@@ -1216,36 +1956,12 @@ export default function App() {
             >
               ↕ Z
             </button>
-
-            {/* View toggle */}
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-              <button
-                onClick={() => setView("list")}
-                style={{
-                  ...btnStyle(view === "list" ? "#00E5FF" : "#445"),
-                  background: view === "list" ? "#00E5FF22" : "transparent",
-                  fontSize: 11,
-                  padding: "3px 10px",
-                }}
-              >
-                ☰
-              </button>
-              <button
-                onClick={() => setView("map")}
-                style={{
-                  ...btnStyle(view === "map" ? "#00E5FF" : "#445"),
-                  background: view === "map" ? "#00E5FF22" : "transparent",
-                  fontSize: 11,
-                  padding: "3px 10px",
-                }}
-              >
-                ⊕
-              </button>
-            </div>
           </div>
+        )}
 
-          {/* Import / Export */}
-          <div style={{ display: "flex", gap: 8 }}>
+        {/* Panneau : import / export */}
+        {activePanel === "data" && (
+          <div style={{ ...PANEL_STYLE, gap: 8 }}>
             <button
               onClick={handleExport}
               style={{
@@ -1276,7 +1992,7 @@ export default function App() {
               onChange={handleImportFile}
             />
           </div>
-        </div>
+        )}
 
         {/* Map view */}
         {view === "map" && (
@@ -1305,6 +2021,7 @@ export default function App() {
             </div>
             <MapView
               pois={filtered}
+              zones={zones}
               selectedId={selectedId}
               onSelect={setSelectedId}
               coordMode={coordMode}
@@ -1405,10 +2122,30 @@ export default function App() {
                   isSelected={poi.id === selectedId}
                   onSelect={setSelectedId}
                   coordMode={coordMode}
+                  zones={zones}
+                  onConvertToZone={convertPoiToZonePoint}
                 />
               ))
             )}
           </div>
+        )}
+
+        {/* Zones view */}
+        {view === "zones" && (
+          <ZonesView
+            zones={zones}
+            coordMode={coordMode}
+            expandedZoneId={expandedZoneId}
+            setExpandedZoneId={setExpandedZoneId}
+            zonePointForm={zonePointForm}
+            setZonePointForm={setZonePointForm}
+            onAddZone={addZone}
+            onUpdateZone={updateZone}
+            onDeleteZone={deleteZone}
+            onAddPoint={addPointToZone}
+            onDeletePoint={deletePoint}
+            onMovePoint={movePoint}
+          />
         )}
       </div>
     </div>
