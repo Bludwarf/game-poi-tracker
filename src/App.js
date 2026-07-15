@@ -1634,7 +1634,7 @@ export default function App() {
         const parsed = JSON.parse(ev.target.result);
         if (!Array.isArray(parsed.pois)) throw new Error("Format invalide");
         const importGameId =
-          parsed.gameId && GAMES[parsed.gameId] ? parsed.gameId : gameId;
+          parsed.gameId && GAMES[parsed.gameId] ? parsed.gameId : "subnautica2";
 
         if (importGameId === gameId) {
           // Même jeu actif : fusion directe dans l'état courant.
@@ -2406,21 +2406,25 @@ export default function App() {
                   {coordMode.axes[2]}:
                   {Number(selPoi.coords[coordMode.order[2]]).toFixed(1)}
                 </span>
-                <button
-                  onClick={() => handleEdit(selPoi)}
-                  style={btnStyle("#00E5FF")}
-                >
-                  ✎
-                </button>
-                <button
-                  onClick={() => {
-                    handleDelete(selPoi.id);
-                    setSelectedId(null);
-                  }}
-                  style={btnStyle("#FF4444")}
-                >
-                  ✕
-                </button>
+                {selPoi.origin !== "predefined" && (
+                  <>
+                    <button
+                      onClick={() => handleEdit(selPoi)}
+                      style={btnStyle("#00E5FF")}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleDelete(selPoi.id);
+                        setSelectedId(null);
+                      }}
+                      style={btnStyle("#FF4444")}
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
