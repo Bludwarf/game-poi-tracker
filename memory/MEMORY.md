@@ -5,3 +5,4 @@
 - [Format des données POI](poi-data-format.md) — structure d'un POI, des zones, et du fichier d'export JSON (v2)
 - [Commandes build/vérif](build-verify-commands.md) — builder App.js dans ce devcontainer (contournements pnpm/ESLint)
 - [Claude Code dans le devcontainer](devcontainer-claude-code-setup.md) — en cours : faire tourner Claude Code dans CodeSandbox via secret API
+- [Plan multi-jeux](plan-multi-jeux.md) — projet de sélection d'autres jeux et de fond de carte
