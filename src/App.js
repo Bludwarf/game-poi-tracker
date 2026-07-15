@@ -84,17 +84,17 @@ const PANEL_STYLE = {
 // Pastille indiquant qu'un filtre est actif sous une icône repliée.
 function ActiveDot() {
   return (
-    <span
-      style={{
-        position: "absolute",
-        top: 3,
-        right: 3,
-        width: 6,
-        height: 6,
-        borderRadius: "50%",
-        background: "#39FF14",
-      }}
-    />
+      <span
+          style={{
+            position: "absolute",
+            top: 3,
+            right: 3,
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: "#39FF14",
+          }}
+      />
   );
 }
 
@@ -112,8 +112,8 @@ function loadState() {
 function saveState(pois, coordMode, invertZ, zones) {
   try {
     localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ pois, coordMode, invertZ, zones })
+        STORAGE_KEY,
+        JSON.stringify({ pois, coordMode, invertZ, zones })
     );
   } catch {}
 }
@@ -130,61 +130,61 @@ function CoordInput({ label, value, onChange }) {
     if (!isNaN(n)) onChange(String(-n));
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label
-        style={{
-          color: "#00E5FF",
-          fontSize: 10,
-          fontFamily: "monospace",
-          letterSpacing: 2,
-        }}
-      >
-        {label}
-      </label>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button
-          onClick={toggleSign}
-          style={{
-            background: "#0D0F14",
-            border: "1px solid #00E5FF33",
-            color: "#00E5FF",
-            fontFamily: "monospace",
-            fontSize: 18,
-            lineHeight: 1,
-            padding: "0 10px",
-            borderRadius: 4,
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <label
+            style={{
+              color: "#00E5FF",
+              fontSize: 10,
+              fontFamily: "monospace",
+              letterSpacing: 2,
+            }}
         >
-          ±
-        </button>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={value}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (/^-?\d*\.?\d*$/.test(v)) onChange(v);
-          }}
-          placeholder="0"
-          style={{
-            background: "#0D0F14",
-            border: "1px solid #00E5FF33",
-            color: "#39FF14",
-            fontFamily: "monospace",
-            fontSize: 16,
-            padding: "8px 6px",
-            borderRadius: 4,
-            width: "100%",
-            outline: "none",
-            textAlign: "center",
-            boxSizing: "border-box",
-            minWidth: 0,
-          }}
-        />
+          {label}
+        </label>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button
+              onClick={toggleSign}
+              style={{
+                background: "#0D0F14",
+                border: "1px solid #00E5FF33",
+                color: "#00E5FF",
+                fontFamily: "monospace",
+                fontSize: 18,
+                lineHeight: 1,
+                padding: "0 10px",
+                borderRadius: 4,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+          >
+            ±
+          </button>
+          <input
+              type="text"
+              inputMode="numeric"
+              value={value}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (/^-?\d*\.?\d*$/.test(v)) onChange(v);
+              }}
+              placeholder="0"
+              style={{
+                background: "#0D0F14",
+                border: "1px solid #00E5FF33",
+                color: "#39FF14",
+                fontFamily: "monospace",
+                fontSize: 16,
+                padding: "8px 6px",
+                borderRadius: 4,
+                width: "100%",
+                outline: "none",
+                textAlign: "center",
+                boxSizing: "border-box",
+                minWidth: 0,
+              }}
+          />
+        </div>
       </div>
-    </div>
   );
 }
 
@@ -234,46 +234,79 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     };
   }, [pois, zones, axisH, axisV]);
 
-  const toCanvas = useCallback(
-    (wh, wv) => {
-      const dw = MAP_SIZE - PADDING * 2,
+  // Échelle commune aux deux axes : on calcule l'échelle qui ferait tenir
+  // chaque axe séparément dans le cadre, puis on prend la MOYENNE des deux
+  // au lieu de les appliquer indépendamment. Ainsi 1 unité de jeu occupe le
+  // même nombre de pixels sur X et sur Z, et la carte n'est plus déformée.
+  const view = useMemo(() => {
+    const dw = MAP_SIZE - PADDING * 2,
         dh = MAP_SIZE - PADDING * 2;
-      const fracV = (wv - bounds.minZ) / (bounds.maxZ - bounds.minZ);
-      return {
-        cx: PADDING + ((wh - bounds.minX) / (bounds.maxX - bounds.minX)) * dw,
-        cy: PADDING + (invertZ ? fracV : 1 - fracV) * dh,
-      };
-    },
-    [bounds, invertZ]
+    const scaleX = dw / (bounds.maxX - bounds.minX);
+    const scaleZ = dh / (bounds.maxZ - bounds.minZ);
+    const scale = (scaleX + scaleZ) / 2;
+    return {
+      dw,
+      dh,
+      scale,
+      centerX: (bounds.minX + bounds.maxX) / 2,
+      centerZ: (bounds.minZ + bounds.maxZ) / 2,
+    };
+  }, [bounds]);
+
+  const toCanvas = useCallback(
+      (wh, wv) => {
+        const { dw, dh, scale, centerX, centerZ } = view;
+        const vOffset = (wv - centerZ) * scale;
+        return {
+          cx: PADDING + dw / 2 + (wh - centerX) * scale,
+          cy: PADDING + dh / 2 + (invertZ ? vOffset : -vOffset),
+        };
+      },
+      [view, invertZ]
+  );
+
+  // Inverse de toCanvas : retrouve les coordonnées monde à partir d'une
+  // position écran, en utilisant la même échelle unique (nécessaire pour
+  // que les graduations affichées correspondent aux marqueurs).
+  const fromCanvas = useCallback(
+      (cx, cy) => {
+        const { dw, dh, scale, centerX, centerZ } = view;
+        const vOffset = cy - PADDING - dh / 2;
+        return {
+          wh: centerX + (cx - PADDING - dw / 2) / scale,
+          wv: invertZ ? centerZ + vOffset / scale : centerZ - vOffset / scale,
+        };
+      },
+      [view, invertZ]
   );
 
   const getPoiAt = useCallback(
-    (clientX, clientY) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      const sx0 = clientX - rect.left;
-      const sy0 = clientY - rect.top;
-      // Test de survol en coordonnées ÉCRAN : le rayon de détection reste
-      // constant (14px) quel que soit le zoom, comme la taille des marqueurs.
-      let closest = null,
-        minDist = 14;
-      pois.forEach((poi) => {
-        const base = toCanvas(
-          Number(poi.coords[axisH]),
-          Number(poi.coords[axisV])
-        );
-        const px = pan.x + base.cx * zoom;
-        const py = pan.y + base.cy * zoom;
-        const dist = Math.hypot(sx0 - px, sy0 - py);
-        if (dist < minDist) {
-          minDist = dist;
-          closest = { poi, sx: sx0, sy: sy0 };
-        }
-      });
-      return closest;
-    },
-    [pois, pan, zoom, toCanvas, axisH, axisV]
+      (clientX, clientY) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+        const rect = canvas.getBoundingClientRect();
+        const sx0 = clientX - rect.left;
+        const sy0 = clientY - rect.top;
+        // Test de survol en coordonnées ÉCRAN : le rayon de détection reste
+        // constant (14px) quel que soit le zoom, comme la taille des marqueurs.
+        let closest = null,
+            minDist = 14;
+        pois.forEach((poi) => {
+          const base = toCanvas(
+              Number(poi.coords[axisH]),
+              Number(poi.coords[axisV])
+          );
+          const px = pan.x + base.cx * zoom;
+          const py = pan.y + base.cy * zoom;
+          const dist = Math.hypot(sx0 - px, sy0 - py);
+          if (dist < minDist) {
+            minDist = dist;
+            closest = { poi, sx: sx0, sy: sy0 };
+          }
+        });
+        return closest;
+      },
+      [pois, pan, zoom, toCanvas, axisH, axisV]
   );
 
   useEffect(() => {
@@ -341,9 +374,9 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     ctx.fillStyle = "#00E5FF88";
     ctx.font = "bold 11px monospace";
     ctx.fillText(
-      `${labelH} →`,
-      MAP_SIZE - PADDING - 28,
-      MAP_SIZE - PADDING + 18
+        `${labelH} →`,
+        MAP_SIZE - PADDING - 28,
+        MAP_SIZE - PADDING + 18
     );
     ctx.fillText(`↑ ${labelV}`, PADDING - 20, PADDING - 8);
 
@@ -352,11 +385,9 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     ctx.font = "9px monospace";
     for (let i = 0; i <= gc; i++) {
       const frac = i / gc;
-      const wh = bounds.minX + frac * (bounds.maxX - bounds.minX);
-      const wv = invertZ
-        ? bounds.minZ + frac * (bounds.maxZ - bounds.minZ)
-        : bounds.maxZ - frac * (bounds.maxZ - bounds.minZ);
       const g = PADDING + frac * (MAP_SIZE - PADDING * 2);
+      const { wh } = fromCanvas(g, PADDING);
+      const { wv } = fromCanvas(PADDING, g);
       const bottom = project(g, MAP_SIZE - PADDING);
       const left = project(PADDING, g);
       ctx.fillText(Math.round(wh), bottom.x - 10, bottom.y + 14);
@@ -368,12 +399,12 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     zones.forEach((zone) => {
       // On garde l'index d'origine (idx) pour numéroter comme la liste Zones.
       const pts = zone.points
-        .map((pt, idx) => {
-          const b = toCanvas(Number(pt.coords[axisH]), Number(pt.coords[axisV]));
-          const p = project(b.cx, b.cy);
-          return { x: p.x, y: p.y, idx };
-        })
-        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+          .map((pt, idx) => {
+            const b = toCanvas(Number(pt.coords[axisH]), Number(pt.coords[axisV]));
+            const p = project(b.cx, b.cy);
+            return { x: p.x, y: p.y, idx };
+          })
+          .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
       if (pts.length === 0) return;
       if (pts.length >= 2) {
         ctx.beginPath();
@@ -404,10 +435,10 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
 
     pois.forEach((poi) => {
       const cat =
-        CATEGORIES.find((c) => c.id === poi.category) || CATEGORIES[5];
+          CATEGORIES.find((c) => c.id === poi.category) || CATEGORIES[5];
       const base = toCanvas(
-        Number(poi.coords[axisH]),
-        Number(poi.coords[axisV])
+          Number(poi.coords[axisH]),
+          Number(poi.coords[axisV])
       );
       const { x: cx, y: cy } = project(base.cx, base.cy);
       const isSel = poi.id === selectedId;
@@ -449,6 +480,7 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     pan,
     bounds,
     toCanvas,
+    fromCanvas,
     axisH,
     axisV,
     labelH,
@@ -481,8 +513,8 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
   const handleMouseUp = (e) => {
     if (dragging.current) {
       const moved = Math.hypot(
-        e.clientX - dragStart.current.x,
-        e.clientY - dragStart.current.y
+          e.clientX - dragStart.current.x,
+          e.clientY - dragStart.current.y
       );
       dragging.current = false;
       if (moved < 4) {
@@ -500,7 +532,7 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     const onWheel = (e) => {
       e.preventDefault();
       setZoom((z) =>
-        Math.min(8, Math.max(0.3, z * (e.deltaY < 0 ? 1.12 : 0.89)))
+          Math.min(8, Math.max(0.3, z * (e.deltaY < 0 ? 1.12 : 0.89)))
       );
     };
     const onTouchMove = (e) => {
@@ -540,11 +572,11 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
     if (dragging.current) {
       const t = e.changedTouches[0];
       const moved = lastTouch.current
-        ? Math.hypot(
-            t.clientX - lastTouch.current.x,
-            t.clientY - lastTouch.current.y
+          ? Math.hypot(
+              t.clientX - lastTouch.current.x,
+              t.clientY - lastTouch.current.y
           )
-        : 99;
+          : 99;
       dragging.current = false;
       if (moved < 6) {
         const hit = getPoiAt(t.clientX, t.clientY);
@@ -555,211 +587,211 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ })
 
   const axisLabels = coordMode.axes;
   return (
-    <div style={{ position: "relative", userSelect: "none" }}>
-      <div
-        style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          zIndex: 5,
-          display: "flex",
-          gap: 4,
-        }}
-      >
-        <button
-          onClick={() => setZoom((z) => Math.min(8, z * 1.25))}
-          style={{ ...btnStyle("#00E5FF"), padding: "2px 8px", fontSize: 15 }}
+      <div style={{ position: "relative", userSelect: "none" }}>
+        <div
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              zIndex: 5,
+              display: "flex",
+              gap: 4,
+            }}
         >
-          +
-        </button>
-        <button
-          onClick={() => setZoom((z) => Math.max(0.3, z * 0.8))}
-          style={{ ...btnStyle("#00E5FF"), padding: "2px 8px", fontSize: 15 }}
-        >
-          −
-        </button>
-        <button
-          onClick={() => {
-            setZoom(1);
-            setPan({ x: 0, y: 0 });
-          }}
-          style={{ ...btnStyle("#778"), padding: "2px 8px", fontSize: 10 }}
-        >
-          ⟲
-        </button>
+          <button
+              onClick={() => setZoom((z) => Math.min(8, z * 1.25))}
+              style={{ ...btnStyle("#00E5FF"), padding: "2px 8px", fontSize: 15 }}
+          >
+            +
+          </button>
+          <button
+              onClick={() => setZoom((z) => Math.max(0.3, z * 0.8))}
+              style={{ ...btnStyle("#00E5FF"), padding: "2px 8px", fontSize: 15 }}
+          >
+            −
+          </button>
+          <button
+              onClick={() => {
+                setZoom(1);
+                setPan({ x: 0, y: 0 });
+              }}
+              style={{ ...btnStyle("#778"), padding: "2px 8px", fontSize: 10 }}
+          >
+            ⟲
+          </button>
+        </div>
+        <canvas
+            ref={canvasRef}
+            style={{
+              display: "block",
+              borderRadius: 6,
+              cursor: "crosshair",
+              touchAction: "none",
+            }}
+            onMouseMove={handleMouseMove}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={() => {
+              dragging.current = false;
+              setTooltip(null);
+            }}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+        />
+        {tooltip && (
+            <div
+                style={{
+                  position: "absolute",
+                  left: tooltip.x + 14,
+                  top: tooltip.y - 10,
+                  background: "#1A1F2E",
+                  border: `1px solid ${
+                      (
+                          CATEGORIES.find((c) => c.id === tooltip.poi.category) ||
+                          CATEGORIES[5]
+                      ).color
+                  }88`,
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                  color: "#E8F4FD",
+                  pointerEvents: "none",
+                  whiteSpace: "nowrap",
+                  zIndex: 20,
+                }}
+            >
+              <div style={{ fontWeight: 700 }}>{tooltip.poi.name}</div>
+              <div style={{ color: "#39FF14", fontSize: 11 }}>
+                {axisLabels[0]}:{Number(tooltip.poi.coords[0]).toFixed(1)}{" "}
+                {axisLabels[1]}:{Number(tooltip.poi.coords[1]).toFixed(1)}{" "}
+                {axisLabels[2]}:{Number(tooltip.poi.coords[2]).toFixed(1)}
+              </div>
+            </div>
+        )}
+        {pois.length === 0 && zones.length === 0 && (
+            <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#334455",
+                  fontFamily: "monospace",
+                  fontSize: 13,
+                  pointerEvents: "none",
+                }}
+            >
+              Aucun POI à afficher
+            </div>
+        )}
       </div>
-      <canvas
-        ref={canvasRef}
-        style={{
-          display: "block",
-          borderRadius: 6,
-          cursor: "crosshair",
-          touchAction: "none",
-        }}
-        onMouseMove={handleMouseMove}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={() => {
-          dragging.current = false;
-          setTooltip(null);
-        }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      />
-      {tooltip && (
-        <div
-          style={{
-            position: "absolute",
-            left: tooltip.x + 14,
-            top: tooltip.y - 10,
-            background: "#1A1F2E",
-            border: `1px solid ${
-              (
-                CATEGORIES.find((c) => c.id === tooltip.poi.category) ||
-                CATEGORIES[5]
-              ).color
-            }88`,
-            borderRadius: 6,
-            padding: "6px 10px",
-            fontFamily: "monospace",
-            fontSize: 12,
-            color: "#E8F4FD",
-            pointerEvents: "none",
-            whiteSpace: "nowrap",
-            zIndex: 20,
-          }}
-        >
-          <div style={{ fontWeight: 700 }}>{tooltip.poi.name}</div>
-          <div style={{ color: "#39FF14", fontSize: 11 }}>
-            {axisLabels[0]}:{Number(tooltip.poi.coords[0]).toFixed(1)}{" "}
-            {axisLabels[1]}:{Number(tooltip.poi.coords[1]).toFixed(1)}{" "}
-            {axisLabels[2]}:{Number(tooltip.poi.coords[2]).toFixed(1)}
-          </div>
-        </div>
-      )}
-      {pois.length === 0 && zones.length === 0 && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#334455",
-            fontFamily: "monospace",
-            fontSize: 13,
-            pointerEvents: "none",
-          }}
-        >
-          Aucun POI à afficher
-        </div>
-      )}
-    </div>
   );
 }
 
 /* ── POICard ───────────────────────────────────────────── */
 function POICard({
-  poi,
-  onDelete,
-  onEdit,
-  isSelected,
-  onSelect,
-  coordMode,
-  zones = [],
-  onConvertToZone,
-}) {
+                   poi,
+                   onDelete,
+                   onEdit,
+                   isSelected,
+                   onSelect,
+                   coordMode,
+                   zones = [],
+                   onConvertToZone,
+                 }) {
   const cat = CATEGORIES.find((c) => c.id === poi.category) || CATEGORIES[5];
   return (
-    <div
-      onClick={() => onSelect(poi.id === isSelected ? null : poi.id)}
-      style={{
-        background: isSelected ? "#1F2840" : "#1A1F2E",
-        border: `1px solid ${isSelected ? cat.color : cat.color + "33"}`,
-        borderLeft: `3px solid ${cat.color}`,
-        borderRadius: 6,
-        padding: "14px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        cursor: "pointer",
-        transition: "border-color 0.15s, background 0.15s",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ color: cat.color, fontSize: 18 }}>{cat.icon}</span>
-        <span
+      <div
+          onClick={() => onSelect(poi.id === isSelected ? null : poi.id)}
           style={{
-            color: "#E8F4FD",
-            fontWeight: 700,
-            fontSize: 15,
-            flex: 1,
-            fontFamily: "monospace",
+            background: isSelected ? "#1F2840" : "#1A1F2E",
+            border: `1px solid ${isSelected ? cat.color : cat.color + "33"}`,
+            borderLeft: `3px solid ${cat.color}`,
+            borderRadius: 6,
+            padding: "14px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            cursor: "pointer",
+            transition: "border-color 0.15s, background 0.15s",
           }}
-        >
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ color: cat.color, fontSize: 18 }}>{cat.icon}</span>
+          <span
+              style={{
+                color: "#E8F4FD",
+                fontWeight: 700,
+                fontSize: 15,
+                flex: 1,
+                fontFamily: "monospace",
+              }}
+          >
           {poi.name}
         </span>
-        <span
-          style={{
-            background: `${cat.color}22`,
-            color: cat.color,
-            fontSize: 10,
-            padding: "2px 8px",
-            borderRadius: 10,
-            fontFamily: "monospace",
-            letterSpacing: 1,
-          }}
-        >
+          <span
+              style={{
+                background: `${cat.color}22`,
+                color: cat.color,
+                fontSize: 10,
+                padding: "2px 8px",
+                borderRadius: 10,
+                fontFamily: "monospace",
+                letterSpacing: 1,
+              }}
+          >
           {cat.label.toUpperCase()}
         </span>
-      </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 6,
-          background: "#0D0F14",
-          borderRadius: 4,
-          padding: "8px 10px",
-          fontFamily: "monospace",
-        }}
-      >
-        {coordMode.order.map((coordIdx, i) => (
-          <div key={i} style={{ textAlign: "center" }}>
-            <div style={{ color: "#00E5FF", fontSize: 10, letterSpacing: 2 }}>
-              {coordMode.axes[i]}
-            </div>
-            <div style={{ color: "#39FF14", fontSize: 14, fontWeight: 700 }}>
-              {poi.coords[coordIdx] !== "" && poi.coords[coordIdx] !== undefined
-                ? Number(poi.coords[coordIdx]).toFixed(1)
-                : "—"}
-            </div>
-          </div>
-        ))}
-      </div>
-      {poi.note && (
-        <div
-          style={{
-            color: "#8899AA",
-            fontSize: 13,
-            fontStyle: "italic",
-            lineHeight: 1.5,
-          }}
-        >
-          {poi.note}
         </div>
-      )}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginTop: 2,
-        }}
-      >
+        <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 6,
+              background: "#0D0F14",
+              borderRadius: 4,
+              padding: "8px 10px",
+              fontFamily: "monospace",
+            }}
+        >
+          {coordMode.order.map((coordIdx, i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ color: "#00E5FF", fontSize: 10, letterSpacing: 2 }}>
+                  {coordMode.axes[i]}
+                </div>
+                <div style={{ color: "#39FF14", fontSize: 14, fontWeight: 700 }}>
+                  {poi.coords[coordIdx] !== "" && poi.coords[coordIdx] !== undefined
+                      ? Number(poi.coords[coordIdx]).toFixed(1)
+                      : "—"}
+                </div>
+              </div>
+          ))}
+        </div>
+        {poi.note && (
+            <div
+                style={{
+                  color: "#8899AA",
+                  fontSize: 13,
+                  fontStyle: "italic",
+                  lineHeight: 1.5,
+                }}
+            >
+              {poi.note}
+            </div>
+        )}
+        <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: 2,
+            }}
+        >
         <span
-          style={{ color: "#445566", fontSize: 11, fontFamily: "monospace" }}
+            style={{ color: "#445566", fontSize: 11, fontFamily: "monospace" }}
         >
           {new Date(poi.createdAt).toLocaleDateString("fr-FR", {
             day: "2-digit",
@@ -767,66 +799,66 @@ function POICard({
             year: "numeric",
           })}
         </span>
-        <div
-          style={{ display: "flex", gap: 6 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {zones.length > 0 && (
-            <select
-              value=""
-              onChange={(e) => {
-                if (e.target.value) onConvertToZone(poi.id, Number(e.target.value));
-              }}
-              title="Convertir ce POI en point d'une zone"
-              style={{
-                background: "#0D0F14",
-                border: "1px solid #2EC4B655",
-                color: "#2EC4B6",
-                fontFamily: "monospace",
-                fontSize: 12,
-                padding: "3px 6px",
-                borderRadius: 4,
-                outline: "none",
-                cursor: "pointer",
-              }}
-            >
-              <option value="" disabled>
-                → zone…
-              </option>
-              {zones.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <button onClick={() => onEdit(poi)} style={btnStyle("#00E5FF")}>
-            ✎
-          </button>
-          <button onClick={() => onDelete(poi.id)} style={btnStyle("#FF4444")}>
-            ✕
-          </button>
+          <div
+              style={{ display: "flex", gap: 6 }}
+              onClick={(e) => e.stopPropagation()}
+          >
+            {zones.length > 0 && (
+                <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) onConvertToZone(poi.id, Number(e.target.value));
+                    }}
+                    title="Convertir ce POI en point d'une zone"
+                    style={{
+                      background: "#0D0F14",
+                      border: "1px solid #2EC4B655",
+                      color: "#2EC4B6",
+                      fontFamily: "monospace",
+                      fontSize: 12,
+                      padding: "3px 6px",
+                      borderRadius: 4,
+                      outline: "none",
+                      cursor: "pointer",
+                    }}
+                >
+                  <option value="" disabled>
+                    → zone…
+                  </option>
+                  {zones.map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.name}
+                      </option>
+                  ))}
+                </select>
+            )}
+            <button onClick={() => onEdit(poi)} style={btnStyle("#00E5FF")}>
+              ✎
+            </button>
+            <button onClick={() => onDelete(poi.id)} style={btnStyle("#FF4444")}>
+              ✕
+            </button>
+          </div>
         </div>
       </div>
-    </div>
   );
 }
 
 /* ── ZonesView ─────────────────────────────────────────── */
 function ZonesView({
-  zones,
-  coordMode,
-  expandedZoneId,
-  setExpandedZoneId,
-  zonePointForm,
-  setZonePointForm,
-  onAddZone,
-  onUpdateZone,
-  onDeleteZone,
-  onAddPoint,
-  onDeletePoint,
-  onMovePoint,
-}) {
+                     zones,
+                     coordMode,
+                     expandedZoneId,
+                     setExpandedZoneId,
+                     zonePointForm,
+                     setZonePointForm,
+                     onAddZone,
+                     onUpdateZone,
+                     onDeleteZone,
+                     onAddPoint,
+                     onDeletePoint,
+                     onMovePoint,
+                   }) {
   const [newName, setNewName] = useState("");
 
   const toggleExpand = (id) => {
@@ -842,347 +874,347 @@ function ZonesView({
 
   // Un point est ajoutable si les 3 coords sont des nombres valides.
   const pointReady = zonePointForm.every(
-    (v) => v !== "" && v !== "-" && Number.isFinite(Number(v))
+      (v) => v !== "" && v !== "-" && Number.isFinite(Number(v))
   );
 
   const label = { color: "#00E5FF", fontFamily: "monospace", fontSize: 11 };
 
   return (
-    <div
-      style={{
-        marginTop: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-      }}
-    >
-      {/* Créer une zone */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAddZone()}
-          placeholder="Nom de la nouvelle zone…"
+      <div
           style={{
-            flex: 1,
-            background: "#1A1F2E",
-            border: "1px solid #334",
-            color: "#C8D6E5",
-            fontSize: 14,
-            padding: "9px 14px",
-            borderRadius: 6,
-            outline: "none",
-            fontFamily: "monospace",
+            marginTop: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
           }}
-        />
-        <button
-          onClick={handleAddZone}
-          style={{
-            ...btnStyle("#00E5FF"),
-            background: "#00E5FF22",
-            fontSize: 13,
-            padding: "0 14px",
-          }}
-        >
-          ＋ Zone
-        </button>
-      </div>
-
-      {zones.length === 0 ? (
-        <div
-          style={{
-            textAlign: "center",
-            color: "#334",
-            fontFamily: "monospace",
-            padding: "40px 20px",
-            border: "1px dashed #223",
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ fontSize: 32, marginBottom: 10 }}>⬠</div>
-          <div>Aucune zone.</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>
-            Créez-en une pour délimiter une aire de la carte.
-          </div>
-        </div>
-      ) : (
-        zones.map((zone) => {
-          const expanded = expandedZoneId === zone.id;
-          return (
-            <div
-              key={zone.id}
+      >
+        {/* Créer une zone */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddZone()}
+              placeholder="Nom de la nouvelle zone…"
               style={{
+                flex: 1,
                 background: "#1A1F2E",
-                border: `1px solid ${zone.color}33`,
-                borderLeft: `3px solid ${zone.color}`,
+                border: "1px solid #334",
+                color: "#C8D6E5",
+                fontSize: 14,
+                padding: "9px 14px",
                 borderRadius: 6,
-                padding: "12px 14px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
+                outline: "none",
+                fontFamily: "monospace",
               }}
-            >
-              {/* En-tête de zone */}
-              <div
+          />
+          <button
+              onClick={handleAddZone}
+              style={{
+                ...btnStyle("#00E5FF"),
+                background: "#00E5FF22",
+                fontSize: 13,
+                padding: "0 14px",
+              }}
+          >
+            ＋ Zone
+          </button>
+        </div>
+
+        {zones.length === 0 ? (
+            <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  flexWrap: "wrap",
+                  textAlign: "center",
+                  color: "#334",
+                  fontFamily: "monospace",
+                  padding: "40px 20px",
+                  border: "1px dashed #223",
+                  borderRadius: 8,
                 }}
-              >
-                <span
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 3,
-                    background: zone.color,
-                    flexShrink: 0,
-                  }}
-                />
-                <input
-                  value={zone.name}
-                  onChange={(e) =>
-                    onUpdateZone(zone.id, { name: e.target.value })
-                  }
-                  style={{
-                    flex: 1,
-                    background: "transparent",
-                    border: "none",
-                    borderBottom: "1px solid transparent",
-                    color: "#E8F4FD",
-                    fontWeight: 700,
-                    fontSize: 15,
-                    fontFamily: "monospace",
-                    outline: "none",
-                    padding: "2px 0",
-                  }}
-                />
-                <span
-                  style={{
-                    color: "#66788A",
-                    fontFamily: "monospace",
-                    fontSize: 11,
-                  }}
-                >
-                  {zone.points.length} pt
-                </span>
-                <button
-                  onClick={() =>
-                    onUpdateZone(zone.id, { closed: !zone.closed })
-                  }
-                  title="Zone fermée (remplie) / ouverte (ligne)"
-                  style={{
-                    ...btnStyle(zone.closed ? zone.color : "#66788A"),
-                    background: zone.closed ? `${zone.color}22` : "transparent",
-                    fontSize: 11,
-                  }}
-                >
-                  {zone.closed ? "▣ Fermée" : "▢ Ouverte"}
-                </button>
-                <button
-                  onClick={() =>
-                    onUpdateZone(zone.id, { showIndices: !zone.showIndices })
-                  }
-                  title="Afficher les numéros des points sur la carte"
-                  style={{
-                    ...btnStyle(zone.showIndices ? zone.color : "#66788A"),
-                    background: zone.showIndices
-                      ? `${zone.color}22`
-                      : "transparent",
-                    fontSize: 11,
-                  }}
-                >
-                  {zone.showIndices ? "☑" : "☐"} N°
-                </button>
-                <button
-                  onClick={() => toggleExpand(zone.id)}
-                  style={btnStyle("#00E5FF")}
-                >
-                  {expanded ? "▾" : "▸"}
-                </button>
-                <button
-                  onClick={() => onDeleteZone(zone.id)}
-                  style={btnStyle("#FF4444")}
-                >
-                  ✕
-                </button>
+            >
+              <div style={{ fontSize: 32, marginBottom: 10 }}>⬠</div>
+              <div>Aucune zone.</div>
+              <div style={{ fontSize: 12, marginTop: 6 }}>
+                Créez-en une pour délimiter une aire de la carte.
               </div>
-
-              {expanded && (
-                <>
-                  {/* Sélecteur de couleur */}
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {ZONE_COLORS.map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => onUpdateZone(zone.id, { color: c })}
-                        title={c}
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 4,
-                          background: c,
-                          border:
-                            zone.color === c
-                              ? "2px solid #E8F4FD"
-                              : "2px solid transparent",
-                          cursor: "pointer",
-                        }}
-                      />
-                    ))}
-                  </div>
-
-                  {/* Ajout d'un point */}
+            </div>
+        ) : (
+            zones.map((zone) => {
+              const expanded = expandedZoneId === zone.id;
+              return (
                   <div
-                    style={{
-                      background: "#0D0F14",
-                      borderRadius: 6,
-                      padding: "10px 12px",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    <div
+                      key={zone.id}
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(3, 1fr)",
-                        gap: 10,
-                      }}
-                    >
-                      {coordMode.order.map((coordIdx, i) => (
-                        <CoordInput
-                          key={i}
-                          label={coordMode.axes[i]}
-                          value={zonePointForm[coordIdx]}
-                          onChange={(v) =>
-                            setZonePointForm((f) => {
-                              const c = [...f];
-                              c[coordIdx] = v;
-                              return c;
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => {
-                        onAddPoint(zone.id, zonePointForm);
-                        setZonePointForm(["", "", ""]);
-                      }}
-                      disabled={!pointReady}
-                      style={{
-                        ...btnStyle(pointReady ? "#39FF14" : "#334"),
-                        background: pointReady ? "#39FF1422" : "transparent",
-                        cursor: pointReady ? "pointer" : "not-allowed",
-                        fontSize: 12,
-                        padding: "7px 0",
-                      }}
-                    >
-                      ＋ Ajouter le point
-                    </button>
-                  </div>
-
-                  {/* Liste des points */}
-                  {zone.points.length === 0 ? (
-                    <div
-                      style={{
-                        color: "#445566",
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        textAlign: "center",
-                        padding: "6px 0",
-                      }}
-                    >
-                      Aucun point — ajoutez-en pour tracer la zone.
-                    </div>
-                  ) : (
-                    <div
-                      style={{
+                        background: "#1A1F2E",
+                        border: `1px solid ${zone.color}33`,
+                        borderLeft: `3px solid ${zone.color}`,
+                        borderRadius: 6,
+                        padding: "12px 14px",
                         display: "flex",
                         flexDirection: "column",
-                        gap: 6,
+                        gap: 10,
                       }}
+                  >
+                    {/* En-tête de zone */}
+                    <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
                     >
-                      {zone.points.map((pt, idx) => (
-                        <div
-                          key={pt.id}
+                <span
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 3,
+                      background: zone.color,
+                      flexShrink: 0,
+                    }}
+                />
+                      <input
+                          value={zone.name}
+                          onChange={(e) =>
+                              onUpdateZone(zone.id, { name: e.target.value })
+                          }
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            background: "#0D0F14",
-                            borderRadius: 4,
-                            padding: "6px 10px",
+                            flex: 1,
+                            background: "transparent",
+                            border: "none",
+                            borderBottom: "1px solid transparent",
+                            color: "#E8F4FD",
+                            fontWeight: 700,
+                            fontSize: 15,
+                            fontFamily: "monospace",
+                            outline: "none",
+                            padding: "2px 0",
                           }}
-                        >
+                      />
+                      <span
+                          style={{
+                            color: "#66788A",
+                            fontFamily: "monospace",
+                            fontSize: 11,
+                          }}
+                      >
+                  {zone.points.length} pt
+                </span>
+                      <button
+                          onClick={() =>
+                              onUpdateZone(zone.id, { closed: !zone.closed })
+                          }
+                          title="Zone fermée (remplie) / ouverte (ligne)"
+                          style={{
+                            ...btnStyle(zone.closed ? zone.color : "#66788A"),
+                            background: zone.closed ? `${zone.color}22` : "transparent",
+                            fontSize: 11,
+                          }}
+                      >
+                        {zone.closed ? "▣ Fermée" : "▢ Ouverte"}
+                      </button>
+                      <button
+                          onClick={() =>
+                              onUpdateZone(zone.id, { showIndices: !zone.showIndices })
+                          }
+                          title="Afficher les numéros des points sur la carte"
+                          style={{
+                            ...btnStyle(zone.showIndices ? zone.color : "#66788A"),
+                            background: zone.showIndices
+                                ? `${zone.color}22`
+                                : "transparent",
+                            fontSize: 11,
+                          }}
+                      >
+                        {zone.showIndices ? "☑" : "☐"} N°
+                      </button>
+                      <button
+                          onClick={() => toggleExpand(zone.id)}
+                          style={btnStyle("#00E5FF")}
+                      >
+                        {expanded ? "▾" : "▸"}
+                      </button>
+                      <button
+                          onClick={() => onDeleteZone(zone.id)}
+                          style={btnStyle("#FF4444")}
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {expanded && (
+                        <>
+                          {/* Sélecteur de couleur */}
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {ZONE_COLORS.map((c) => (
+                                <button
+                                    key={c}
+                                    onClick={() => onUpdateZone(zone.id, { color: c })}
+                                    title={c}
+                                    style={{
+                                      width: 22,
+                                      height: 22,
+                                      borderRadius: 4,
+                                      background: c,
+                                      border:
+                                          zone.color === c
+                                              ? "2px solid #E8F4FD"
+                                              : "2px solid transparent",
+                                      cursor: "pointer",
+                                    }}
+                                />
+                            ))}
+                          </div>
+
+                          {/* Ajout d'un point */}
+                          <div
+                              style={{
+                                background: "#0D0F14",
+                                borderRadius: 6,
+                                padding: "10px 12px",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 10,
+                              }}
+                          >
+                            <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(3, 1fr)",
+                                  gap: 10,
+                                }}
+                            >
+                              {coordMode.order.map((coordIdx, i) => (
+                                  <CoordInput
+                                      key={i}
+                                      label={coordMode.axes[i]}
+                                      value={zonePointForm[coordIdx]}
+                                      onChange={(v) =>
+                                          setZonePointForm((f) => {
+                                            const c = [...f];
+                                            c[coordIdx] = v;
+                                            return c;
+                                          })
+                                      }
+                                  />
+                              ))}
+                            </div>
+                            <button
+                                onClick={() => {
+                                  onAddPoint(zone.id, zonePointForm);
+                                  setZonePointForm(["", "", ""]);
+                                }}
+                                disabled={!pointReady}
+                                style={{
+                                  ...btnStyle(pointReady ? "#39FF14" : "#334"),
+                                  background: pointReady ? "#39FF1422" : "transparent",
+                                  cursor: pointReady ? "pointer" : "not-allowed",
+                                  fontSize: 12,
+                                  padding: "7px 0",
+                                }}
+                            >
+                              ＋ Ajouter le point
+                            </button>
+                          </div>
+
+                          {/* Liste des points */}
+                          {zone.points.length === 0 ? (
+                              <div
+                                  style={{
+                                    color: "#445566",
+                                    fontFamily: "monospace",
+                                    fontSize: 12,
+                                    textAlign: "center",
+                                    padding: "6px 0",
+                                  }}
+                              >
+                                Aucun point — ajoutez-en pour tracer la zone.
+                              </div>
+                          ) : (
+                              <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 6,
+                                  }}
+                              >
+                                {zone.points.map((pt, idx) => (
+                                    <div
+                                        key={pt.id}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 8,
+                                          background: "#0D0F14",
+                                          borderRadius: 4,
+                                          padding: "6px 10px",
+                                        }}
+                                    >
                           <span style={{ ...label, color: "#66788A" }}>
                             #{idx + 1}
                           </span>
-                          <span
-                            style={{
-                              flex: 1,
-                              color: "#39FF14",
-                              fontFamily: "monospace",
-                              fontSize: 13,
-                            }}
-                          >
+                                      <span
+                                          style={{
+                                            flex: 1,
+                                            color: "#39FF14",
+                                            fontFamily: "monospace",
+                                            fontSize: 13,
+                                          }}
+                                      >
                             {coordMode.order
-                              .map(
-                                (coordIdx, i) =>
-                                  `${coordMode.axes[i]}:${Number(
-                                    pt.coords[coordIdx]
-                                  ).toFixed(1)}`
-                              )
-                              .join("  ")}
+                                .map(
+                                    (coordIdx, i) =>
+                                        `${coordMode.axes[i]}:${Number(
+                                            pt.coords[coordIdx]
+                                        ).toFixed(1)}`
+                                )
+                                .join("  ")}
                           </span>
-                          <button
-                            onClick={() => onMovePoint(zone.id, idx, -1)}
-                            disabled={idx === 0}
-                            style={{
-                              ...btnStyle(idx === 0 ? "#334" : "#00E5FF"),
-                              cursor: idx === 0 ? "not-allowed" : "pointer",
-                              padding: "2px 8px",
-                            }}
-                          >
-                            ▲
-                          </button>
-                          <button
-                            onClick={() => onMovePoint(zone.id, idx, 1)}
-                            disabled={idx === zone.points.length - 1}
-                            style={{
-                              ...btnStyle(
-                                idx === zone.points.length - 1
-                                  ? "#334"
-                                  : "#00E5FF"
-                              ),
-                              cursor:
-                                idx === zone.points.length - 1
-                                  ? "not-allowed"
-                                  : "pointer",
-                              padding: "2px 8px",
-                            }}
-                          >
-                            ▼
-                          </button>
-                          <button
-                            onClick={() => onDeletePoint(zone.id, pt.id)}
-                            style={{ ...btnStyle("#FF4444"), padding: "2px 8px" }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })
-      )}
-    </div>
+                                      <button
+                                          onClick={() => onMovePoint(zone.id, idx, -1)}
+                                          disabled={idx === 0}
+                                          style={{
+                                            ...btnStyle(idx === 0 ? "#334" : "#00E5FF"),
+                                            cursor: idx === 0 ? "not-allowed" : "pointer",
+                                            padding: "2px 8px",
+                                          }}
+                                      >
+                                        ▲
+                                      </button>
+                                      <button
+                                          onClick={() => onMovePoint(zone.id, idx, 1)}
+                                          disabled={idx === zone.points.length - 1}
+                                          style={{
+                                            ...btnStyle(
+                                                idx === zone.points.length - 1
+                                                    ? "#334"
+                                                    : "#00E5FF"
+                                            ),
+                                            cursor:
+                                                idx === zone.points.length - 1
+                                                    ? "not-allowed"
+                                                    : "pointer",
+                                            padding: "2px 8px",
+                                          }}
+                                      >
+                                        ▼
+                                      </button>
+                                      <button
+                                          onClick={() => onDeletePoint(zone.id, pt.id)}
+                                          style={{ ...btnStyle("#FF4444"), padding: "2px 8px" }}
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                ))}
+                              </div>
+                          )}
+                        </>
+                    )}
+                  </div>
+              );
+            })
+        )}
+      </div>
   );
 }
 
@@ -1219,7 +1251,7 @@ export default function App() {
 
   const [pois, setPois] = useState(saved?.pois ?? DEFAULT_POIS);
   const [coordMode, setCoordModeRaw] = useState(
-    () => COORD_MODES.find((m) => m.id === saved?.coordMode) ?? COORD_MODES[0]
+      () => COORD_MODES.find((m) => m.id === saved?.coordMode) ?? COORD_MODES[0]
   );
   const [invertZ, setInvertZ] = useState(() => saved?.invertZ ?? false);
   const [zones, setZones] = useState(saved?.zones ?? []);
@@ -1277,8 +1309,8 @@ export default function App() {
     let list = pois.filter((p) => {
       const matchCat = filterCat === "all" || p.category === filterCat;
       const matchSearch =
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        (p.note || "").toLowerCase().includes(search.toLowerCase());
+          p.name.toLowerCase().includes(search.toLowerCase()) ||
+          (p.note || "").toLowerCase().includes(search.toLowerCase());
       return matchCat && matchSearch;
     });
     if (sort === "date_desc")
@@ -1296,7 +1328,7 @@ export default function App() {
     if (!form.name.trim()) return;
     if (editId !== null) {
       setPois((p) =>
-        p.map((poi) => (poi.id === editId ? { ...poi, ...form } : poi))
+          p.map((poi) => (poi.id === editId ? { ...poi, ...form } : poi))
       );
       setEditId(null);
     } else {
@@ -1349,7 +1381,7 @@ export default function App() {
   };
 
   const updateZone = (id, patch) =>
-    setZones((zs) => zs.map((z) => (z.id === id ? { ...z, ...patch } : z)));
+      setZones((zs) => zs.map((z) => (z.id === id ? { ...z, ...patch } : z)));
 
   const deleteZone = (id) => {
     setZones((zs) => zs.filter((z) => z.id !== id));
@@ -1361,50 +1393,50 @@ export default function App() {
     // coordMode.order), on ne re-mappe pas — juste coercition numérique.
     const coords = formCoords.map((v) => Number(v));
     setZones((zs) =>
-      zs.map((z) =>
-        z.id === zoneId
-          ? { ...z, points: [...z.points, { id: genId(), coords }] }
-          : z
-      )
+        zs.map((z) =>
+            z.id === zoneId
+                ? { ...z, points: [...z.points, { id: genId(), coords }] }
+                : z
+        )
     );
   };
 
   const deletePoint = (zoneId, pointId) =>
-    setZones((zs) =>
-      zs.map((z) =>
-        z.id === zoneId
-          ? { ...z, points: z.points.filter((p) => p.id !== pointId) }
-          : z
-      )
-    );
+      setZones((zs) =>
+          zs.map((z) =>
+              z.id === zoneId
+                  ? { ...z, points: z.points.filter((p) => p.id !== pointId) }
+                  : z
+          )
+      );
 
   const movePoint = (zoneId, index, dir) =>
-    setZones((zs) =>
-      zs.map((z) => {
-        if (z.id !== zoneId) return z;
-        const j = index + dir;
-        if (j < 0 || j >= z.points.length) return z;
-        const pts = [...z.points];
-        [pts[index], pts[j]] = [pts[j], pts[index]];
-        return { ...z, points: pts };
-      })
-    );
+      setZones((zs) =>
+          zs.map((z) => {
+            if (z.id !== zoneId) return z;
+            const j = index + dir;
+            if (j < 0 || j >= z.points.length) return z;
+            const pts = [...z.points];
+            [pts[index], pts[j]] = [pts[j], pts[index]];
+            return { ...z, points: pts };
+          })
+      );
 
   const convertPoiToZonePoint = (poiId, zoneId) => {
     const poi = pois.find((p) => p.id === poiId);
     if (!poi) return;
     setZones((zs) =>
-      zs.map((z) =>
-        z.id === zoneId
-          ? {
-              ...z,
-              points: [
-                ...z.points,
-                { id: genId(), coords: [...poi.coords].map(Number) },
-              ],
-            }
-          : z
-      )
+        zs.map((z) =>
+            z.id === zoneId
+                ? {
+                  ...z,
+                  points: [
+                    ...z.points,
+                    { id: genId(), coords: [...poi.coords].map(Number) },
+                  ],
+                }
+                : z
+        )
     );
     handleDelete(poiId);
   };
@@ -1412,9 +1444,9 @@ export default function App() {
   /* ── Export JSON ── */
   const handleExport = () => {
     const data = JSON.stringify(
-      { version: 2, coordMode: coordMode.id, zones, pois },
-      null,
-      2
+        { version: 2, coordMode: coordMode.id, zones, pois },
+        null,
+        2
     );
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1443,21 +1475,21 @@ export default function App() {
         if (Array.isArray(parsed.zones)) {
           const existingZoneIds = new Set(zones.map((z) => z.id));
           const newZones = parsed.zones.filter(
-            (z) => !existingZoneIds.has(z.id)
+              (z) => !existingZoneIds.has(z.id)
           );
           newZonesCount = newZones.length;
           if (newZones.length) setZones((prev) => [...prev, ...newZones]);
         }
         if (parsed.coordMode)
           setCoordModeRaw(
-            COORD_MODES.find((m) => m.id === parsed.coordMode) ?? coordMode
+              COORD_MODES.find((m) => m.id === parsed.coordMode) ?? coordMode
           );
         const zoneMsg =
-          newZonesCount > 0 ? ` + ${newZonesCount} zone(s)` : "";
+            newZonesCount > 0 ? ` + ${newZonesCount} zone(s)` : "";
         setImportErr(
-          newPois.length === 0 && newZonesCount === 0
-            ? "Aucun nouveau POI importé (tous déjà présents)."
-            : `${newPois.length} POI(s)${zoneMsg} importé(s) avec succès !`
+            newPois.length === 0 && newZonesCount === 0
+                ? "Aucun nouveau POI importé (tous déjà présents)."
+                : `${newPois.length} POI(s)${zoneMsg} importé(s) avec succès !`
         );
       } catch (err) {
         setImportErr("Erreur : fichier JSON invalide.");
@@ -1470,684 +1502,684 @@ export default function App() {
 
   const selPoi = pois.find((p) => p.id === selectedId);
   const selCat = selPoi
-    ? CATEGORIES.find((c) => c.id === selPoi.category) || CATEGORIES[5]
-    : null;
+      ? CATEGORIES.find((c) => c.id === selPoi.category) || CATEGORIES[5]
+      : null;
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0D0F14",
-        color: "#C8D6E5",
-        fontFamily: "sans-serif",
-        paddingBottom: 60,
-      }}
-    >
-      {/* Header */}
       <div
-        style={{
-          background: "#0D0F14",
-          borderBottom: "1px solid #00E5FF22",
-          padding: "18px 20px 14px",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
+          style={{
+            minHeight: "100vh",
+            background: "#0D0F14",
+            color: "#C8D6E5",
+            fontFamily: "sans-serif",
+            paddingBottom: 60,
+          }}
       >
+        {/* Header */}
         <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            maxWidth: 600,
-            margin: "0 auto",
-          }}
+            style={{
+              background: "#0D0F14",
+              borderBottom: "1px solid #00E5FF22",
+              padding: "18px 20px 14px",
+              position: "sticky",
+              top: 0,
+              zIndex: 10,
+            }}
         >
-          <div>
-            <div
-              style={{
-                color: "#00E5FF",
-                fontFamily: "monospace",
-                fontSize: 11,
-                letterSpacing: 3,
-                marginBottom: 2,
-              }}
-            >
-              ◈ WAYPOINT SYSTEM
-            </div>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: 22,
-                fontWeight: 800,
-                color: "#E8F4FD",
-                letterSpacing: 1,
-              }}
-            >
-              Points d'Intérêt
-            </h1>
-          </div>
-          <button
-            onClick={() => {
-              setShowForm((s) => !s);
-              if (showForm) handleCancel();
-            }}
-            style={{
-              background: showForm ? "#FF444422" : "#00E5FF22",
-              border: `1px solid ${showForm ? "#FF4444" : "#00E5FF"}`,
-              color: showForm ? "#FF4444" : "#00E5FF",
-              fontFamily: "monospace",
-              fontSize: 13,
-              padding: "8px 18px",
-              borderRadius: 6,
-              cursor: "pointer",
-              letterSpacing: 1,
-            }}
-          >
-            {showForm ? "✕ Annuler" : "+ NOUVEAU"}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 16px" }}>
-        {/* Notification import */}
-        {importErr && (
           <div
-            style={{
-              marginTop: 12,
-              background: importErr.startsWith("Erreur")
-                ? "#FF444422"
-                : "#39FF1422",
-              border: `1px solid ${
-                importErr.startsWith("Erreur") ? "#FF4444" : "#39FF14"
-              }`,
-              color: importErr.startsWith("Erreur") ? "#FF4444" : "#39FF14",
-              borderRadius: 6,
-              padding: "8px 14px",
-              fontFamily: "monospace",
-              fontSize: 12,
-            }}
-          >
-            {importErr}
-          </div>
-        )}
-
-        {/* Form */}
-        {showForm && (
-          <div
-            style={{
-              background: "#1A1F2E",
-              border: "1px solid #00E5FF44",
-              borderRadius: 8,
-              padding: "20px",
-              marginTop: 20,
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-            }}
-          >
-            <div
               style={{
-                color: "#00E5FF",
-                fontFamily: "monospace",
-                fontSize: 11,
-                letterSpacing: 2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                maxWidth: 600,
+                margin: "0 auto",
               }}
-            >
-              {editId ? "◈ MODIFIER LE POI" : "◈ NOUVEAU POI"}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label
-                style={{
-                  color: "#00E5FF",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  letterSpacing: 2,
-                }}
-              >
-                NOM
-              </label>
-              <input
-                value={form.name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, name: e.target.value }))
-                }
-                placeholder="Ex: Coffre secret du donjon..."
-                style={{
-                  background: "#0D0F14",
-                  border: "1px solid #00E5FF33",
-                  color: "#E8F4FD",
-                  fontSize: 15,
-                  padding: "9px 12px",
-                  borderRadius: 4,
-                  outline: "none",
-                  fontFamily: "monospace",
-                }}
-              />
-            </div>
+          >
             <div>
               <div
-                style={{
-                  color: "#00E5FF",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  letterSpacing: 2,
-                  marginBottom: 8,
-                }}
+                  style={{
+                    color: "#00E5FF",
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    letterSpacing: 3,
+                    marginBottom: 2,
+                  }}
               >
-                COORDONNÉES 3D{" "}
-                <span style={{ color: "#445", fontWeight: 400 }}>
-                  ({coordMode.label})
-                </span>
+                ◈ WAYPOINT SYSTEM
               </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: 10,
-                }}
+              <h1
+                  style={{
+                    margin: 0,
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: "#E8F4FD",
+                    letterSpacing: 1,
+                  }}
               >
-                {coordMode.order.map((coordIdx, i) => (
-                  <CoordInput
-                    key={i}
-                    label={coordMode.axes[i]}
-                    value={form.coords[coordIdx]}
-                    onChange={(v) =>
-                      setForm((f) => {
-                        const c = [...f.coords];
-                        c[coordIdx] = v;
-                        return { ...f, coords: c };
-                      })
-                    }
-                  />
-                ))}
-              </div>
+                Points d'Intérêt
+              </h1>
             </div>
-            <div>
-              <div
-                style={{
-                  color: "#00E5FF",
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  letterSpacing: 2,
-                  marginBottom: 8,
+            <button
+                onClick={() => {
+                  setShowForm((s) => !s);
+                  if (showForm) handleCancel();
                 }}
-              >
-                CATÉGORIE
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setForm((f) => ({ ...f, category: cat.id }))}
-                    style={{
-                      background:
-                        form.category === cat.id
-                          ? `${cat.color}33`
-                          : "transparent",
-                      border: `1px solid ${
-                        form.category === cat.id ? cat.color : "#334"
-                      }`,
-                      color: form.category === cat.id ? cat.color : "#778",
-                      fontFamily: "monospace",
-                      fontSize: 12,
-                      padding: "5px 12px",
-                      borderRadius: 4,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {cat.icon} {cat.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <label
                 style={{
-                  color: "#00E5FF",
-                  fontSize: 10,
+                  background: showForm ? "#FF444422" : "#00E5FF22",
+                  border: `1px solid ${showForm ? "#FF4444" : "#00E5FF"}`,
+                  color: showForm ? "#FF4444" : "#00E5FF",
                   fontFamily: "monospace",
-                  letterSpacing: 2,
-                }}
-              >
-                NOTE (optionnel)
-              </label>
-              <textarea
-                value={form.note}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, note: e.target.value }))
-                }
-                placeholder="Détails, conditions, indices..."
-                rows={2}
-                style={{
-                  background: "#0D0F14",
-                  border: "1px solid #00E5FF33",
-                  color: "#C8D6E5",
                   fontSize: 13,
-                  padding: "9px 12px",
-                  borderRadius: 4,
-                  outline: "none",
-                  resize: "vertical",
-                  fontFamily: "sans-serif",
-                }}
-              />
-            </div>
-            <button
-              onClick={handleSubmit}
-              style={{
-                background: "#00E5FF22",
-                border: "1px solid #00E5FF",
-                color: "#00E5FF",
-                fontFamily: "monospace",
-                fontSize: 14,
-                padding: "10px",
-                borderRadius: 6,
-                cursor: "pointer",
-                letterSpacing: 2,
-                fontWeight: 700,
-              }}
-            >
-              {editId ? "✔ METTRE À JOUR" : "✔ ENREGISTRER"}
-            </button>
-          </div>
-        )}
-
-        {/* Compact toolbar: view toggle + icon buttons */}
-        <div
-          style={{
-            marginTop: 20,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          {/* View toggle (toujours visible) */}
-          <div style={{ display: "flex", gap: 4 }}>
-            <button
-              onClick={() => setView("list")}
-              title="Vue liste"
-              style={{
-                ...iconBtn(view === "list"),
-                fontSize: 14,
-              }}
-            >
-              ☰
-            </button>
-            <button
-              onClick={() => setView("map")}
-              title="Vue carte"
-              style={{
-                ...iconBtn(view === "map"),
-                fontSize: 14,
-              }}
-            >
-              ⊕
-            </button>
-            <button
-              onClick={() => setView("zones")}
-              title="Vue zones"
-              style={{
-                ...iconBtn(view === "zones"),
-                fontSize: 14,
-              }}
-            >
-              ⬠
-            </button>
-          </div>
-
-          {/* Icon buttons (ouvrent leur panneau) */}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            <button
-              onClick={(e) => togglePanel("search", e)}
-              title="Rechercher"
-              style={iconBtn(activePanel === "search")}
-            >
-              🔍
-              {search && activePanel !== "search" && <ActiveDot />}
-            </button>
-            <button
-              onClick={(e) => togglePanel("filters", e)}
-              title="Filtres & tri"
-              style={iconBtn(activePanel === "filters")}
-            >
-              ⚑
-              {filterCat !== "all" && activePanel !== "filters" && <ActiveDot />}
-            </button>
-            <button
-              onClick={(e) => togglePanel("axes", e)}
-              title="Axes & affichage"
-              style={iconBtn(activePanel === "axes", "#FFD700")}
-            >
-              ⚙
-            </button>
-            <button
-              onClick={(e) => togglePanel("data", e)}
-              title="Import / Export JSON"
-              style={iconBtn(activePanel === "data", "#AA88FF")}
-            >
-              ⇅
-            </button>
-          </div>
-        </div>
-
-        {/* Panneau : recherche */}
-        {activePanel === "search" && (
-          <div style={PANEL_STYLE}>
-            <input
-              autoFocus
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="🔍  Rechercher un POI..."
-              style={{
-                background: "#0D0F14",
-                border: "1px solid #334",
-                color: "#C8D6E5",
-                fontSize: 14,
-                padding: "9px 14px",
-                borderRadius: 6,
-                outline: "none",
-                fontFamily: "monospace",
-                width: "100%",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-        )}
-
-        {/* Panneau : filtres catégorie + tri */}
-        {activePanel === "filters" && (
-          <div
-            style={{ ...PANEL_STYLE, flexDirection: "column", gap: 12 }}
-          >
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button
-                onClick={() => setFilterCat("all")}
-                style={{
-                  ...btnStyle(filterCat === "all" ? "#00E5FF" : "#445"),
-                  background: filterCat === "all" ? "#00E5FF22" : "transparent",
-                  fontSize: 11,
+                  padding: "8px 18px",
+                  borderRadius: 6,
+                  cursor: "pointer",
                   letterSpacing: 1,
                 }}
-              >
-                TOUS ({pois.length})
-              </button>
-              {CATEGORIES.map((cat) => {
-                const count = pois.filter((p) => p.category === cat.id).length;
-                if (!count) return null;
-                return (
-                  <button
-                    key={cat.id}
-                    onClick={() => setFilterCat(cat.id)}
-                    style={{
-                      ...btnStyle(filterCat === cat.id ? cat.color : "#445"),
-                      background:
-                        filterCat === cat.id ? `${cat.color}22` : "transparent",
-                      fontSize: 11,
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {cat.icon} {count}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span
-                style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
-              >
-                TRI :
-              </span>
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-                style={{
-                  background: "#0D0F14",
-                  border: "1px solid #334",
-                  color: "#889",
-                  fontFamily: "monospace",
-                  fontSize: 12,
-                  padding: "4px 8px",
-                  borderRadius: 4,
-                  outline: "none",
-                }}
-              >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Panneau : axes & affichage */}
-        {activePanel === "axes" && (
-          <div style={{ ...PANEL_STYLE, alignItems: "center" }}>
-            <span
-              style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
             >
-              AXES :
-            </span>
-            {COORD_MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setCoordMode(m)}
-                style={{
-                  ...btnStyle(coordMode.id === m.id ? "#FFD700" : "#445"),
-                  background:
-                    coordMode.id === m.id ? "#FFD70022" : "transparent",
-                  fontSize: 11,
-                  padding: "3px 9px",
-                }}
-              >
-                {m.label}
-              </button>
-            ))}
-            <button
-              onClick={() => setInvertZ((v) => !v)}
-              title="Inverser l'axe Z sur la carte"
-              style={{
-                ...btnStyle(invertZ ? "#FFD700" : "#445"),
-                background: invertZ ? "#FFD70022" : "transparent",
-                fontSize: 11,
-                padding: "3px 9px",
-              }}
-            >
-              ↕ Z
+              {showForm ? "✕ Annuler" : "+ NOUVEAU"}
             </button>
           </div>
-        )}
+        </div>
 
-        {/* Panneau : import / export */}
-        {activePanel === "data" && (
-          <div style={{ ...PANEL_STYLE, gap: 8 }}>
-            <button
-              onClick={handleExport}
-              style={{
-                ...btnStyle("#AA88FF"),
-                flex: 1,
-                fontSize: 12,
-                padding: "7px 0",
-              }}
-            >
-              ↓ Exporter JSON
-            </button>
-            <button
-              onClick={() => importRef.current?.click()}
-              style={{
-                ...btnStyle("#39FF14"),
-                flex: 1,
-                fontSize: 12,
-                padding: "7px 0",
-              }}
-            >
-              ↑ Importer JSON
-            </button>
-            <input
-              ref={importRef}
-              type="file"
-              accept=".json,application/json"
-              style={{ display: "none" }}
-              onChange={handleImportFile}
-            />
-          </div>
-        )}
-
-        {/* Map view */}
-        {view === "map" && (
-          <div
-            style={{
-              marginTop: 16,
-              background: "#1A1F2E",
-              borderRadius: 8,
-              border: "1px solid #00E5FF22",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                padding: "8px 14px",
-                borderBottom: "1px solid #00E5FF11",
-                fontFamily: "monospace",
-                fontSize: 10,
-                color: "#445",
-                letterSpacing: 1,
-              }}
-            >
-              CARTE {coordMode.axes[coordMode.order.indexOf(coordMode.mapH)]}/
-              {coordMode.axes[coordMode.order.indexOf(coordMode.mapV)]} ·
-              Scroll=zoom · Glisser=pan · Tap=sélect
-            </div>
-            <MapView
-              pois={filtered}
-              zones={zones}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              coordMode={coordMode}
-              invertZ={invertZ}
-            />
-            {selPoi && (
+        <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 16px" }}>
+          {/* Notification import */}
+          {importErr && (
               <div
-                style={{
-                  padding: "10px 14px",
-                  borderTop: "1px solid #00E5FF11",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span style={{ color: selCat.color, fontSize: 16 }}>
-                  {selCat.icon}
-                </span>
-                <span
                   style={{
-                    color: "#E8F4FD",
-                    fontFamily: "monospace",
-                    fontWeight: 700,
-                    flex: 1,
-                  }}
-                >
-                  {selPoi.name}
-                </span>
-                <span
-                  style={{
-                    color: "#39FF14",
+                    marginTop: 12,
+                    background: importErr.startsWith("Erreur")
+                        ? "#FF444422"
+                        : "#39FF1422",
+                    border: `1px solid ${
+                        importErr.startsWith("Erreur") ? "#FF4444" : "#39FF14"
+                    }`,
+                    color: importErr.startsWith("Erreur") ? "#FF4444" : "#39FF14",
+                    borderRadius: 6,
+                    padding: "8px 14px",
                     fontFamily: "monospace",
                     fontSize: 12,
                   }}
-                >
-                  {coordMode.axes[0]}:
-                  {Number(selPoi.coords[coordMode.order[0]]).toFixed(1)}{" "}
-                  {coordMode.axes[1]}:
-                  {Number(selPoi.coords[coordMode.order[1]]).toFixed(1)}{" "}
-                  {coordMode.axes[2]}:
-                  {Number(selPoi.coords[coordMode.order[2]]).toFixed(1)}
-                </span>
-                <button
-                  onClick={() => handleEdit(selPoi)}
-                  style={btnStyle("#00E5FF")}
-                >
-                  ✎
-                </button>
-                <button
-                  onClick={() => {
-                    handleDelete(selPoi.id);
-                    setSelectedId(null);
+              >
+                {importErr}
+              </div>
+          )}
+
+          {/* Form */}
+          {showForm && (
+              <div
+                  style={{
+                    background: "#1A1F2E",
+                    border: "1px solid #00E5FF44",
+                    borderRadius: 8,
+                    padding: "20px",
+                    marginTop: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 14,
                   }}
-                  style={btnStyle("#FF4444")}
+              >
+                <div
+                    style={{
+                      color: "#00E5FF",
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                      letterSpacing: 2,
+                    }}
                 >
-                  ✕
+                  {editId ? "◈ MODIFIER LE POI" : "◈ NOUVEAU POI"}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label
+                      style={{
+                        color: "#00E5FF",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        letterSpacing: 2,
+                      }}
+                  >
+                    NOM
+                  </label>
+                  <input
+                      value={form.name}
+                      onChange={(e) =>
+                          setForm((f) => ({ ...f, name: e.target.value }))
+                      }
+                      placeholder="Ex: Coffre secret du donjon..."
+                      style={{
+                        background: "#0D0F14",
+                        border: "1px solid #00E5FF33",
+                        color: "#E8F4FD",
+                        fontSize: 15,
+                        padding: "9px 12px",
+                        borderRadius: 4,
+                        outline: "none",
+                        fontFamily: "monospace",
+                      }}
+                  />
+                </div>
+                <div>
+                  <div
+                      style={{
+                        color: "#00E5FF",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        letterSpacing: 2,
+                        marginBottom: 8,
+                      }}
+                  >
+                    COORDONNÉES 3D{" "}
+                    <span style={{ color: "#445", fontWeight: 400 }}>
+                  ({coordMode.label})
+                </span>
+                  </div>
+                  <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, 1fr)",
+                        gap: 10,
+                      }}
+                  >
+                    {coordMode.order.map((coordIdx, i) => (
+                        <CoordInput
+                            key={i}
+                            label={coordMode.axes[i]}
+                            value={form.coords[coordIdx]}
+                            onChange={(v) =>
+                                setForm((f) => {
+                                  const c = [...f.coords];
+                                  c[coordIdx] = v;
+                                  return { ...f, coords: c };
+                                })
+                            }
+                        />
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div
+                      style={{
+                        color: "#00E5FF",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        letterSpacing: 2,
+                        marginBottom: 8,
+                      }}
+                  >
+                    CATÉGORIE
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {CATEGORIES.map((cat) => (
+                        <button
+                            key={cat.id}
+                            onClick={() => setForm((f) => ({ ...f, category: cat.id }))}
+                            style={{
+                              background:
+                                  form.category === cat.id
+                                      ? `${cat.color}33`
+                                      : "transparent",
+                              border: `1px solid ${
+                                  form.category === cat.id ? cat.color : "#334"
+                              }`,
+                              color: form.category === cat.id ? cat.color : "#778",
+                              fontFamily: "monospace",
+                              fontSize: 12,
+                              padding: "5px 12px",
+                              borderRadius: 4,
+                              cursor: "pointer",
+                            }}
+                        >
+                          {cat.icon} {cat.label}
+                        </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label
+                      style={{
+                        color: "#00E5FF",
+                        fontSize: 10,
+                        fontFamily: "monospace",
+                        letterSpacing: 2,
+                      }}
+                  >
+                    NOTE (optionnel)
+                  </label>
+                  <textarea
+                      value={form.note}
+                      onChange={(e) =>
+                          setForm((f) => ({ ...f, note: e.target.value }))
+                      }
+                      placeholder="Détails, conditions, indices..."
+                      rows={2}
+                      style={{
+                        background: "#0D0F14",
+                        border: "1px solid #00E5FF33",
+                        color: "#C8D6E5",
+                        fontSize: 13,
+                        padding: "9px 12px",
+                        borderRadius: 4,
+                        outline: "none",
+                        resize: "vertical",
+                        fontFamily: "sans-serif",
+                      }}
+                  />
+                </div>
+                <button
+                    onClick={handleSubmit}
+                    style={{
+                      background: "#00E5FF22",
+                      border: "1px solid #00E5FF",
+                      color: "#00E5FF",
+                      fontFamily: "monospace",
+                      fontSize: 14,
+                      padding: "10px",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      letterSpacing: 2,
+                      fontWeight: 700,
+                    }}
+                >
+                  {editId ? "✔ METTRE À JOUR" : "✔ ENREGISTRER"}
                 </button>
               </div>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* List view */}
-        {view === "list" && (
+          {/* Compact toolbar: view toggle + icon buttons */}
           <div
-            style={{
-              marginTop: 16,
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-            }}
+              style={{
+                marginTop: 20,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
           >
-            {filtered.length === 0 ? (
-              <div
-                style={{
-                  textAlign: "center",
-                  color: "#334",
-                  fontFamily: "monospace",
-                  padding: "40px 20px",
-                  border: "1px dashed #223",
-                  borderRadius: 8,
-                }}
+            {/* View toggle (toujours visible) */}
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                  onClick={() => setView("list")}
+                  title="Vue liste"
+                  style={{
+                    ...iconBtn(view === "list"),
+                    fontSize: 14,
+                  }}
               >
-                <div style={{ fontSize: 32, marginBottom: 10 }}>◈</div>
-                <div>Aucun point d'intérêt trouvé.</div>
-                <div style={{ fontSize: 12, marginTop: 6 }}>
-                  Ajoutez-en un avec le bouton + NOUVEAU
+                ☰
+              </button>
+              <button
+                  onClick={() => setView("map")}
+                  title="Vue carte"
+                  style={{
+                    ...iconBtn(view === "map"),
+                    fontSize: 14,
+                  }}
+              >
+                ⊕
+              </button>
+              <button
+                  onClick={() => setView("zones")}
+                  title="Vue zones"
+                  style={{
+                    ...iconBtn(view === "zones"),
+                    fontSize: 14,
+                  }}
+              >
+                ⬠
+              </button>
+            </div>
+
+            {/* Icon buttons (ouvrent leur panneau) */}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+              <button
+                  onClick={(e) => togglePanel("search", e)}
+                  title="Rechercher"
+                  style={iconBtn(activePanel === "search")}
+              >
+                🔍
+                {search && activePanel !== "search" && <ActiveDot />}
+              </button>
+              <button
+                  onClick={(e) => togglePanel("filters", e)}
+                  title="Filtres & tri"
+                  style={iconBtn(activePanel === "filters")}
+              >
+                ⚑
+                {filterCat !== "all" && activePanel !== "filters" && <ActiveDot />}
+              </button>
+              <button
+                  onClick={(e) => togglePanel("axes", e)}
+                  title="Axes & affichage"
+                  style={iconBtn(activePanel === "axes", "#FFD700")}
+              >
+                ⚙
+              </button>
+              <button
+                  onClick={(e) => togglePanel("data", e)}
+                  title="Import / Export JSON"
+                  style={iconBtn(activePanel === "data", "#AA88FF")}
+              >
+                ⇅
+              </button>
+            </div>
+          </div>
+
+          {/* Panneau : recherche */}
+          {activePanel === "search" && (
+              <div style={PANEL_STYLE}>
+                <input
+                    autoFocus
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="🔍  Rechercher un POI..."
+                    style={{
+                      background: "#0D0F14",
+                      border: "1px solid #334",
+                      color: "#C8D6E5",
+                      fontSize: 14,
+                      padding: "9px 14px",
+                      borderRadius: 6,
+                      outline: "none",
+                      fontFamily: "monospace",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                />
+              </div>
+          )}
+
+          {/* Panneau : filtres catégorie + tri */}
+          {activePanel === "filters" && (
+              <div
+                  style={{ ...PANEL_STYLE, flexDirection: "column", gap: 12 }}
+              >
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                      onClick={() => setFilterCat("all")}
+                      style={{
+                        ...btnStyle(filterCat === "all" ? "#00E5FF" : "#445"),
+                        background: filterCat === "all" ? "#00E5FF22" : "transparent",
+                        fontSize: 11,
+                        letterSpacing: 1,
+                      }}
+                  >
+                    TOUS ({pois.length})
+                  </button>
+                  {CATEGORIES.map((cat) => {
+                    const count = pois.filter((p) => p.category === cat.id).length;
+                    if (!count) return null;
+                    return (
+                        <button
+                            key={cat.id}
+                            onClick={() => setFilterCat(cat.id)}
+                            style={{
+                              ...btnStyle(filterCat === cat.id ? cat.color : "#445"),
+                              background:
+                                  filterCat === cat.id ? `${cat.color}22` : "transparent",
+                              fontSize: 11,
+                              letterSpacing: 1,
+                            }}
+                        >
+                          {cat.icon} {count}
+                        </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                  style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
+              >
+                TRI :
+              </span>
+                  <select
+                      value={sort}
+                      onChange={(e) => setSort(e.target.value)}
+                      style={{
+                        background: "#0D0F14",
+                        border: "1px solid #334",
+                        color: "#889",
+                        fontFamily: "monospace",
+                        fontSize: 12,
+                        padding: "4px 8px",
+                        borderRadius: 4,
+                        outline: "none",
+                      }}
+                  >
+                    {SORT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            ) : (
-              filtered.map((poi) => (
-                <POICard
-                  key={poi.id}
-                  poi={poi}
-                  onDelete={handleDelete}
-                  onEdit={handleEdit}
-                  isSelected={poi.id === selectedId}
-                  onSelect={setSelectedId}
-                  coordMode={coordMode}
-                  zones={zones}
-                  onConvertToZone={convertPoiToZonePoint}
-                />
-              ))
-            )}
-          </div>
-        )}
+          )}
 
-        {/* Zones view */}
-        {view === "zones" && (
-          <ZonesView
-            zones={zones}
-            coordMode={coordMode}
-            expandedZoneId={expandedZoneId}
-            setExpandedZoneId={setExpandedZoneId}
-            zonePointForm={zonePointForm}
-            setZonePointForm={setZonePointForm}
-            onAddZone={addZone}
-            onUpdateZone={updateZone}
-            onDeleteZone={deleteZone}
-            onAddPoint={addPointToZone}
-            onDeletePoint={deletePoint}
-            onMovePoint={movePoint}
-          />
-        )}
+          {/* Panneau : axes & affichage */}
+          {activePanel === "axes" && (
+              <div style={{ ...PANEL_STYLE, alignItems: "center" }}>
+            <span
+                style={{ color: "#445", fontFamily: "monospace", fontSize: 11 }}
+            >
+              AXES :
+            </span>
+                {COORD_MODES.map((m) => (
+                    <button
+                        key={m.id}
+                        onClick={() => setCoordMode(m)}
+                        style={{
+                          ...btnStyle(coordMode.id === m.id ? "#FFD700" : "#445"),
+                          background:
+                              coordMode.id === m.id ? "#FFD70022" : "transparent",
+                          fontSize: 11,
+                          padding: "3px 9px",
+                        }}
+                    >
+                      {m.label}
+                    </button>
+                ))}
+                <button
+                    onClick={() => setInvertZ((v) => !v)}
+                    title="Inverser l'axe Z sur la carte"
+                    style={{
+                      ...btnStyle(invertZ ? "#FFD700" : "#445"),
+                      background: invertZ ? "#FFD70022" : "transparent",
+                      fontSize: 11,
+                      padding: "3px 9px",
+                    }}
+                >
+                  ↕ Z
+                </button>
+              </div>
+          )}
+
+          {/* Panneau : import / export */}
+          {activePanel === "data" && (
+              <div style={{ ...PANEL_STYLE, gap: 8 }}>
+                <button
+                    onClick={handleExport}
+                    style={{
+                      ...btnStyle("#AA88FF"),
+                      flex: 1,
+                      fontSize: 12,
+                      padding: "7px 0",
+                    }}
+                >
+                  ↓ Exporter JSON
+                </button>
+                <button
+                    onClick={() => importRef.current?.click()}
+                    style={{
+                      ...btnStyle("#39FF14"),
+                      flex: 1,
+                      fontSize: 12,
+                      padding: "7px 0",
+                    }}
+                >
+                  ↑ Importer JSON
+                </button>
+                <input
+                    ref={importRef}
+                    type="file"
+                    accept=".json,application/json"
+                    style={{ display: "none" }}
+                    onChange={handleImportFile}
+                />
+              </div>
+          )}
+
+          {/* Map view */}
+          {view === "map" && (
+              <div
+                  style={{
+                    marginTop: 16,
+                    background: "#1A1F2E",
+                    borderRadius: 8,
+                    border: "1px solid #00E5FF22",
+                    overflow: "hidden",
+                  }}
+              >
+                <div
+                    style={{
+                      padding: "8px 14px",
+                      borderBottom: "1px solid #00E5FF11",
+                      fontFamily: "monospace",
+                      fontSize: 10,
+                      color: "#445",
+                      letterSpacing: 1,
+                    }}
+                >
+                  CARTE {coordMode.axes[coordMode.order.indexOf(coordMode.mapH)]}/
+                  {coordMode.axes[coordMode.order.indexOf(coordMode.mapV)]} ·
+                  Scroll=zoom · Glisser=pan · Tap=sélect
+                </div>
+                <MapView
+                    pois={filtered}
+                    zones={zones}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                    coordMode={coordMode}
+                    invertZ={invertZ}
+                />
+                {selPoi && (
+                    <div
+                        style={{
+                          padding: "10px 14px",
+                          borderTop: "1px solid #00E5FF11",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                    >
+                <span style={{ color: selCat.color, fontSize: 16 }}>
+                  {selCat.icon}
+                </span>
+                      <span
+                          style={{
+                            color: "#E8F4FD",
+                            fontFamily: "monospace",
+                            fontWeight: 700,
+                            flex: 1,
+                          }}
+                      >
+                  {selPoi.name}
+                </span>
+                      <span
+                          style={{
+                            color: "#39FF14",
+                            fontFamily: "monospace",
+                            fontSize: 12,
+                          }}
+                      >
+                  {coordMode.axes[0]}:
+                        {Number(selPoi.coords[coordMode.order[0]]).toFixed(1)}{" "}
+                        {coordMode.axes[1]}:
+                        {Number(selPoi.coords[coordMode.order[1]]).toFixed(1)}{" "}
+                        {coordMode.axes[2]}:
+                        {Number(selPoi.coords[coordMode.order[2]]).toFixed(1)}
+                </span>
+                      <button
+                          onClick={() => handleEdit(selPoi)}
+                          style={btnStyle("#00E5FF")}
+                      >
+                        ✎
+                      </button>
+                      <button
+                          onClick={() => {
+                            handleDelete(selPoi.id);
+                            setSelectedId(null);
+                          }}
+                          style={btnStyle("#FF4444")}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                )}
+              </div>
+          )}
+
+          {/* List view */}
+          {view === "list" && (
+              <div
+                  style={{
+                    marginTop: 16,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+              >
+                {filtered.length === 0 ? (
+                    <div
+                        style={{
+                          textAlign: "center",
+                          color: "#334",
+                          fontFamily: "monospace",
+                          padding: "40px 20px",
+                          border: "1px dashed #223",
+                          borderRadius: 8,
+                        }}
+                    >
+                      <div style={{ fontSize: 32, marginBottom: 10 }}>◈</div>
+                      <div>Aucun point d'intérêt trouvé.</div>
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        Ajoutez-en un avec le bouton + NOUVEAU
+                      </div>
+                    </div>
+                ) : (
+                    filtered.map((poi) => (
+                        <POICard
+                            key={poi.id}
+                            poi={poi}
+                            onDelete={handleDelete}
+                            onEdit={handleEdit}
+                            isSelected={poi.id === selectedId}
+                            onSelect={setSelectedId}
+                            coordMode={coordMode}
+                            zones={zones}
+                            onConvertToZone={convertPoiToZonePoint}
+                        />
+                    ))
+                )}
+              </div>
+          )}
+
+          {/* Zones view */}
+          {view === "zones" && (
+              <ZonesView
+                  zones={zones}
+                  coordMode={coordMode}
+                  expandedZoneId={expandedZoneId}
+                  setExpandedZoneId={setExpandedZoneId}
+                  zonePointForm={zonePointForm}
+                  setZonePointForm={setZonePointForm}
+                  onAddZone={addZone}
+                  onUpdateZone={updateZone}
+                  onDeleteZone={deleteZone}
+                  onAddPoint={addPointToZone}
+                  onDeletePoint={deletePoint}
+                  onMovePoint={movePoint}
+              />
+          )}
+        </div>
       </div>
-    </div>
   );
 }
