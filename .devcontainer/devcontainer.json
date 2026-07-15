@@ -1,0 +1,16 @@
+{
+  "name": "game-poi-tracker",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "updateContentCommand": "pnpm install",
+  "postAttachCommand": "pnpm start",
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Mistralai.vibe",  // Extension officielle
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}

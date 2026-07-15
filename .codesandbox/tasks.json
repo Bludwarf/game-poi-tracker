@@ -1,0 +1,41 @@
+{
+  // These tasks will run in order when initializing your CodeSandbox project.
+  "setupTasks": [
+    {
+      "name": "Installing Dependencies",
+      "command": "pnpm install"
+    }
+  ],
+
+  // These tasks can be run from CodeSandbox. Running one will open a log in the app.
+  "tasks": {
+    "start": {
+      "name": "start",
+      "command": "pnpm start",
+      "runAtStart": true,
+      "preview": {
+        "port": 3000
+      }
+    },
+    "build": {
+      "name": "build",
+      "command": "pnpm build"
+    },
+    "test": {
+      "name": "test",
+      "command": "pnpm test"
+    },
+    "eject": {
+      "name": "eject",
+      "command": "pnpm eject"
+    },
+    "setup-claude": {
+      "name": "Install Claude Code",
+      "command": "npm install -g @anthropic-ai/claude-code && echo '✅ Claude Code prêt'"
+    },
+    "setup-vibe-cli": {
+      "name": "Install Vibe CLI (Mistral)",
+      "command": "curl -fsSL https://vibe.mistral.ai/install.sh | sh"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/game-poi-tracker/static/css/main.1779e890.css",
+    "main.js": "/game-poi-tracker/static/js/main.5df285ad.js",
+    "index.html": "/game-poi-tracker/index.html",
+    "main.1779e890.css.map": "/game-poi-tracker/static/css/main.1779e890.css.map",
+    "main.5df285ad.js.map": "/game-poi-tracker/static/js/main.5df285ad.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.1779e890.css",
+    "static/js/main.5df285ad.js"
+  ]
+}
