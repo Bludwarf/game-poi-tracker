@@ -1,8 +1,8 @@
 {
   "name": "game-poi-tracker",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
-  "postCreateCommand": "pnpm install",
-  "postStartCommand": "pnpm start &",
+  "updateContentCommand": "pnpm install",
+  "postAttachCommand": "pnpm start",
   "forwardPorts": [3000],
   "customizations": {
     "vscode": {
