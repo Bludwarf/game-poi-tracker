@@ -122,11 +122,28 @@ function loadGameState(gameId) {
   }
 }
 
-function saveGameState(gameId, pois, coordMode, invertZ, zones, discoveredPredefinedIds) {
+function saveGameState(
+  gameId,
+  pois,
+  coordMode,
+  invertZ,
+  zones,
+  discoveredPredefinedIds,
+  showBackground = true,
+  fogEnabled = true
+) {
   try {
     localStorage.setItem(
       storageKeyFor(gameId),
-      JSON.stringify({ pois, coordMode, invertZ, zones, discoveredPredefinedIds })
+      JSON.stringify({
+        pois,
+        coordMode,
+        invertZ,
+        zones,
+        discoveredPredefinedIds,
+        showBackground,
+        fogEnabled,
+      })
     );
   } catch {}
 }
@@ -224,9 +241,87 @@ function CoordInput({ label, value, onChange }) {
 /* ── MapView ───────────────────────────────────────────── */
 const MAP_SIZE = 520;
 const PADDING = 40;
+// Rayon (en unités de jeu) autour de chaque POI visible où le brouillard
+// se dissipe. Indépendant du zoom : projeté via l'échelle courante.
+const FOG_REVEAL_RADIUS = 450;
 
-function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ, categories }) {
+// PRNG déterministe (seed fixe) : le fond généré est stable d'un rendu à
+// l'autre au lieu de scintiller à chaque re-render.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Fond océanique généré proceduralement (option A du plan, §6.1) : dégradé
+// bleu/turquoise + taches et courants, zéro dépendance externe, zéro souci
+// de droits. Rendu une seule fois dans un canvas hors-écran et mis en cache
+// par MapView (le calque de brouillard s'occupe ensuite de le révéler).
+function generateOceanTexture(size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const rand = mulberry32(1337);
+
+  const grad = ctx.createLinearGradient(0, 0, size, size);
+  grad.addColorStop(0, "#031A2E");
+  grad.addColorStop(0.5, "#04263F");
+  grad.addColorStop(1, "#062F4A");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+
+  // Taches de relief/courants (dégradés radiaux superposés).
+  for (let i = 0; i < 140; i++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const r = 20 + rand() * 90;
+    const hue = rand() > 0.5 ? "#0D3B52" : "#0A4A5E";
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, hue + "55");
+    g.addColorStop(1, hue + "00");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Lignes de courant sinueuses, discrètes.
+  ctx.strokeStyle = "#0FF3D022";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 16; i++) {
+    let y = rand() * size;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= size; x += 40) {
+      y += Math.sin(x * 0.02 + i) * 6;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  return canvas;
+}
+
+function MapView({
+  pois,
+  zones = [],
+  selectedId,
+  onSelect,
+  coordMode,
+  invertZ,
+  categories,
+  showBackground,
+  fogEnabled,
+}) {
   const canvasRef = useRef(null);
+  const bgTextureRef = useRef(null);
+  const fogMaskRef = useRef(null);
+  const fogRevealRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -363,6 +458,50 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ, c
 
     ctx.fillStyle = "#0D0F14";
     ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
+
+    if (showBackground) {
+      if (!bgTextureRef.current) {
+        bgTextureRef.current = generateOceanTexture(MAP_SIZE);
+      }
+      if (fogEnabled) {
+        // Masque : cercles doux (dégradé radial) centrés sur chaque POI
+        // visible, en coordonnées écran (donc suit le pan/zoom des
+        // marqueurs). Voir plan §6.4.
+        const mask = fogMaskRef.current || (fogMaskRef.current = document.createElement("canvas"));
+        mask.width = MAP_SIZE;
+        mask.height = MAP_SIZE;
+        const mctx = mask.getContext("2d");
+        mctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
+        pois.forEach((poi) => {
+          const base = toCanvas(Number(poi.coords[axisH]), Number(poi.coords[axisV]));
+          const p = project(base.cx, base.cy);
+          const r = FOG_REVEAL_RADIUS * view.scale * zoom;
+          if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || r <= 0) return;
+          const g = mctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+          g.addColorStop(0, "#FFFFFFFF");
+          g.addColorStop(0.65, "#FFFFFFFF");
+          g.addColorStop(1, "#FFFFFF00");
+          mctx.fillStyle = g;
+          mctx.beginPath();
+          mctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          mctx.fill();
+        });
+
+        const reveal = fogRevealRef.current || (fogRevealRef.current = document.createElement("canvas"));
+        reveal.width = MAP_SIZE;
+        reveal.height = MAP_SIZE;
+        const rctx = reveal.getContext("2d");
+        rctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
+        rctx.drawImage(bgTextureRef.current, 0, 0, MAP_SIZE, MAP_SIZE);
+        rctx.globalCompositeOperation = "destination-in";
+        rctx.drawImage(mask, 0, 0);
+        rctx.globalCompositeOperation = "source-over";
+
+        ctx.drawImage(reveal, 0, 0);
+      } else {
+        ctx.drawImage(bgTextureRef.current, 0, 0, MAP_SIZE, MAP_SIZE);
+      }
+    }
 
     const gc = 8;
     ctx.strokeStyle = "#1A2A3A";
@@ -515,6 +654,7 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ, c
     bounds,
     toCanvas,
     fromCanvas,
+    view,
     axisH,
     axisV,
     labelH,
@@ -522,6 +662,8 @@ function MapView({ pois, zones = [], selectedId, onSelect, coordMode, invertZ, c
     coordMode,
     invertZ,
     categories,
+    showBackground,
+    fogEnabled,
   ]);
 
   const handleMouseMove = (e) => {
@@ -1331,6 +1473,10 @@ export default function App() {
   );
   const [invertZ, setInvertZ] = useState(() => saved?.invertZ ?? false);
   const [zones, setZones] = useState(saved?.zones ?? []);
+  // Phase 5 : fond de carte procédural + brouillard révélé autour des POI
+  // visibles (§6 du plan). Activés par défaut, désactivables si gênants.
+  const [showBackground, setShowBackground] = useState(() => saved?.showBackground ?? true);
+  const [fogEnabled, setFogEnabled] = useState(() => saved?.fogEnabled ?? true);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editId, setEditId] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -1379,28 +1525,17 @@ export default function App() {
 
   // Persist on every change (dans le stockage du jeu actif uniquement)
   useEffect(() => {
-    saveGameState(gameId, pois, coordMode.id, invertZ, zones, discoveredPredefinedIds);
-  }, [gameId, pois, coordMode, invertZ, zones, discoveredPredefinedIds]);
-
-  // Modale du formulaire (ajout/édition) : fermeture au clavier + on bloque
-  // le scroll de la page derrière pour éviter le double-scroll sur mobile.
-  useEffect(() => {
-    if (!showForm) return;
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        setForm(EMPTY_FORM);
-        setEditId(null);
-        setShowForm(false);
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [showForm]);
+    saveGameState(
+      gameId,
+      pois,
+      coordMode.id,
+      invertZ,
+      zones,
+      discoveredPredefinedIds,
+      showBackground,
+      fogEnabled
+    );
+  }, [gameId, pois, coordMode, invertZ, zones, discoveredPredefinedIds, showBackground, fogEnabled]);
 
   // Bascule vers un autre jeu : sauvegarde implicite déjà faite par l'effet
   // ci-dessus, il suffit de recharger l'état propre au nouveau jeu.
@@ -1416,6 +1551,8 @@ export default function App() {
     setInvertZ(next?.invertZ ?? false);
     setZones(next?.zones ?? []);
     setDiscoveredPredefinedIds(next?.discoveredPredefinedIds ?? []);
+    setShowBackground(next?.showBackground ?? true);
+    setFogEnabled(next?.fogEnabled ?? true);
     setSelectedId(null);
     setForm(EMPTY_FORM);
     setEditId(null);
@@ -1856,72 +1993,29 @@ export default function App() {
           </div>
         )}
 
-        {/* Form (modale flottante : évite d'avoir à remonter en haut de page
-            pour éditer un POI depuis le bas de la liste) */}
+        {/* Form */}
         {showForm && (
           <div
-            onClick={handleCancel}
             style={{
-              position: "fixed",
-              inset: 0,
-              background: "#05070ACC",
-              backdropFilter: "blur(2px)",
-              zIndex: 100,
+              background: "#1A1F2E",
+              border: "1px solid #00E5FF44",
+              borderRadius: 8,
+              padding: "20px",
+              marginTop: 20,
               display: "flex",
-              alignItems: window.innerWidth < 640 ? "flex-end" : "center",
-              justifyContent: "center",
-              padding: window.innerWidth < 640 ? 0 : 16,
+              flexDirection: "column",
+              gap: 14,
             }}
           >
             <div
-              onClick={(e) => e.stopPropagation()}
               style={{
-                background: "#1A1F2E",
-                border: "1px solid #00E5FF44",
-                borderRadius: window.innerWidth < 640 ? "12px 12px 0 0" : 8,
-                padding: "20px",
-                width: "100%",
-                maxWidth: 560,
-                maxHeight: "88vh",
-                overflowY: "auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                boxShadow: "0 -4px 30px #000A",
+                color: "#00E5FF",
+                fontFamily: "monospace",
+                fontSize: 11,
+                letterSpacing: 2,
               }}
             >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div
-                style={{
-                  color: "#00E5FF",
-                  fontFamily: "monospace",
-                  fontSize: 11,
-                  letterSpacing: 2,
-                }}
-              >
-                {editId ? "◈ MODIFIER LE POI" : "◈ NOUVEAU POI"}
-              </div>
-              <button
-                onClick={handleCancel}
-                aria-label="Fermer"
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "#66788A",
-                  fontSize: 20,
-                  lineHeight: 1,
-                  cursor: "pointer",
-                  padding: "0 4px",
-                }}
-              >
-                ✕
-              </button>
+              {editId ? "◈ MODIFIER LE POI" : "◈ NOUVEAU POI"}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label
@@ -2150,7 +2244,6 @@ export default function App() {
             >
               {editId ? "✔ METTRE À JOUR" : "✔ ENREGISTRER"}
             </button>
-            </div>
           </div>
         )}
 
@@ -2360,6 +2453,37 @@ export default function App() {
             >
               ↕ Z
             </button>
+            <button
+              onClick={() => setShowBackground((v) => !v)}
+              title="Afficher le fond de carte océanique"
+              style={{
+                ...btnStyle(showBackground ? "#2EC4B6" : "#445"),
+                background: showBackground ? "#2EC4B622" : "transparent",
+                fontSize: 11,
+                padding: "3px 9px",
+              }}
+            >
+              🌊 Fond
+            </button>
+            <button
+              onClick={() => setFogEnabled((v) => !v)}
+              disabled={!showBackground}
+              title={
+                showBackground
+                  ? "Ne révéler le fond qu'autour des POI connus"
+                  : "Active le fond de carte pour utiliser le brouillard"
+              }
+              style={{
+                ...btnStyle(fogEnabled && showBackground ? "#2EC4B6" : "#445"),
+                background: fogEnabled && showBackground ? "#2EC4B622" : "transparent",
+                fontSize: 11,
+                padding: "3px 9px",
+                opacity: showBackground ? 1 : 0.4,
+                cursor: showBackground ? "pointer" : "not-allowed",
+              }}
+            >
+              🌫 Brouillard
+            </button>
           </div>
         )}
 
@@ -2431,6 +2555,8 @@ export default function App() {
               coordMode={coordMode}
               invertZ={invertZ}
               categories={game.categories}
+              showBackground={showBackground}
+              fogEnabled={fogEnabled}
             />
             {selPoi && (
               <div
