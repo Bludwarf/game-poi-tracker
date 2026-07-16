@@ -257,16 +257,27 @@ function mulberry32(seed) {
   };
 }
 
+// Dérive une seed numérique stable à partir de l'id du jeu, pour que chaque
+// jeu ait son propre fond généré (sans avoir à le configurer explicitement
+// dans src/games/*.js).
+function hashStringToSeed(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  return h || 1;
+}
+
 // Fond océanique généré proceduralement (option A du plan, §6.1) : dégradé
 // bleu/turquoise + taches et courants, zéro dépendance externe, zéro souci
 // de droits. Rendu une seule fois dans un canvas hors-écran et mis en cache
 // par MapView (le calque de brouillard s'occupe ensuite de le révéler).
-function generateOceanTexture(size) {
+function generateOceanTexture(size, seed = 1337) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
-  const rand = mulberry32(1337);
+  const rand = mulberry32(seed);
 
   const grad = ctx.createLinearGradient(0, 0, size, size);
   grad.addColorStop(0, "#031A2E");
@@ -317,6 +328,7 @@ function MapView({
   categories,
   showBackground,
   fogEnabled,
+  gameId,
 }) {
   const canvasRef = useRef(null);
   const bgTextureRef = useRef(null);
@@ -460,13 +472,26 @@ function MapView({
     ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
 
     if (showBackground) {
-      if (!bgTextureRef.current) {
-        bgTextureRef.current = generateOceanTexture(MAP_SIZE);
+      const bgSeed = hashStringToSeed(gameId);
+      if (!bgTextureRef.current || bgTextureRef.current.seed !== bgSeed) {
+        bgTextureRef.current = {
+          seed: bgSeed,
+          canvas: generateOceanTexture(MAP_SIZE, bgSeed),
+        };
       }
+      const bgTexture = bgTextureRef.current.canvas;
+
+      // Tout ce qui suit est dessiné dans l'espace "non zoomé" (celui que
+      // renvoie toCanvas), puis la même transformation pan/zoom que pour
+      // les marqueurs (project()) est appliquée au calque entier : le fond
+      // se déplace et zoome avec la carte au lieu de rester figé à l'écran.
+      let layer = bgTexture;
+
       if (fogEnabled) {
         // Masque : cercles doux (dégradé radial) centrés sur chaque POI
-        // visible, en coordonnées écran (donc suit le pan/zoom des
-        // marqueurs). Voir plan §6.4.
+        // visible, en coordonnées "non zoomées" (mêmes que le fond, donc
+        // la transformation globale ci-dessous s'applique aux deux à
+        // l'identique). Voir plan §6.4.
         const mask = fogMaskRef.current || (fogMaskRef.current = document.createElement("canvas"));
         mask.width = MAP_SIZE;
         mask.height = MAP_SIZE;
@@ -474,16 +499,15 @@ function MapView({
         mctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
         pois.forEach((poi) => {
           const base = toCanvas(Number(poi.coords[axisH]), Number(poi.coords[axisV]));
-          const p = project(base.cx, base.cy);
-          const r = FOG_REVEAL_RADIUS * view.scale * zoom;
-          if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || r <= 0) return;
-          const g = mctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+          const r = FOG_REVEAL_RADIUS * view.scale;
+          if (!Number.isFinite(base.cx) || !Number.isFinite(base.cy) || r <= 0) return;
+          const g = mctx.createRadialGradient(base.cx, base.cy, 0, base.cx, base.cy, r);
           g.addColorStop(0, "#FFFFFFFF");
           g.addColorStop(0.65, "#FFFFFFFF");
           g.addColorStop(1, "#FFFFFF00");
           mctx.fillStyle = g;
           mctx.beginPath();
-          mctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          mctx.arc(base.cx, base.cy, r, 0, Math.PI * 2);
           mctx.fill();
         });
 
@@ -492,15 +516,18 @@ function MapView({
         reveal.height = MAP_SIZE;
         const rctx = reveal.getContext("2d");
         rctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
-        rctx.drawImage(bgTextureRef.current, 0, 0, MAP_SIZE, MAP_SIZE);
+        rctx.drawImage(bgTexture, 0, 0, MAP_SIZE, MAP_SIZE);
         rctx.globalCompositeOperation = "destination-in";
         rctx.drawImage(mask, 0, 0);
         rctx.globalCompositeOperation = "source-over";
-
-        ctx.drawImage(reveal, 0, 0);
-      } else {
-        ctx.drawImage(bgTextureRef.current, 0, 0, MAP_SIZE, MAP_SIZE);
+        layer = reveal;
       }
+
+      ctx.save();
+      ctx.translate(pan.x, pan.y);
+      ctx.scale(zoom, zoom);
+      ctx.drawImage(layer, 0, 0, MAP_SIZE, MAP_SIZE);
+      ctx.restore();
     }
 
     const gc = 8;
@@ -664,6 +691,7 @@ function MapView({
     categories,
     showBackground,
     fogEnabled,
+    gameId,
   ]);
 
   const handleMouseMove = (e) => {
@@ -2557,6 +2585,7 @@ export default function App() {
               categories={game.categories}
               showBackground={showBackground}
               fogEnabled={fogEnabled}
+              gameId={gameId}
             />
             {selPoi && (
               <div
