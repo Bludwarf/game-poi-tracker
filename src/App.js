@@ -1382,6 +1382,26 @@ export default function App() {
     saveGameState(gameId, pois, coordMode.id, invertZ, zones, discoveredPredefinedIds);
   }, [gameId, pois, coordMode, invertZ, zones, discoveredPredefinedIds]);
 
+  // Modale du formulaire (ajout/édition) : fermeture au clavier + on bloque
+  // le scroll de la page derrière pour éviter le double-scroll sur mobile.
+  useEffect(() => {
+    if (!showForm) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setForm(EMPTY_FORM);
+        setEditId(null);
+        setShowForm(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showForm]);
+
   // Bascule vers un autre jeu : sauvegarde implicite déjà faite par l'effet
   // ci-dessus, il suffit de recharger l'état propre au nouveau jeu.
   const handleGameChange = (newGameId) => {
@@ -1836,29 +1856,72 @@ export default function App() {
           </div>
         )}
 
-        {/* Form */}
+        {/* Form (modale flottante : évite d'avoir à remonter en haut de page
+            pour éditer un POI depuis le bas de la liste) */}
         {showForm && (
           <div
+            onClick={handleCancel}
             style={{
-              background: "#1A1F2E",
-              border: "1px solid #00E5FF44",
-              borderRadius: 8,
-              padding: "20px",
-              marginTop: 20,
+              position: "fixed",
+              inset: 0,
+              background: "#05070ACC",
+              backdropFilter: "blur(2px)",
+              zIndex: 100,
               display: "flex",
-              flexDirection: "column",
-              gap: 14,
+              alignItems: window.innerWidth < 640 ? "flex-end" : "center",
+              justifyContent: "center",
+              padding: window.innerWidth < 640 ? 0 : 16,
             }}
           >
             <div
+              onClick={(e) => e.stopPropagation()}
               style={{
-                color: "#00E5FF",
-                fontFamily: "monospace",
-                fontSize: 11,
-                letterSpacing: 2,
+                background: "#1A1F2E",
+                border: "1px solid #00E5FF44",
+                borderRadius: window.innerWidth < 640 ? "12px 12px 0 0" : 8,
+                padding: "20px",
+                width: "100%",
+                maxWidth: 560,
+                maxHeight: "88vh",
+                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 -4px 30px #000A",
               }}
             >
-              {editId ? "◈ MODIFIER LE POI" : "◈ NOUVEAU POI"}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div
+                style={{
+                  color: "#00E5FF",
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  letterSpacing: 2,
+                }}
+              >
+                {editId ? "◈ MODIFIER LE POI" : "◈ NOUVEAU POI"}
+              </div>
+              <button
+                onClick={handleCancel}
+                aria-label="Fermer"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#66788A",
+                  fontSize: 20,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  padding: "0 4px",
+                }}
+              >
+                ✕
+              </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label
@@ -2087,6 +2150,7 @@ export default function App() {
             >
               {editId ? "✔ METTRE À JOUR" : "✔ ENREGISTRER"}
             </button>
+            </div>
           </div>
         )}
 
